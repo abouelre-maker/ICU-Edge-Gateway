@@ -1,0 +1,159 @@
+# =============================================================================
+# CI/CD — ICU Edge-to-FHIR Interoperability Gateway
+# IEC 62304 §5.7: Automated verification gate for every push and PR.
+# Quality Gate: Ruff → Mypy → Bandit → pip-audit → pytest → Docker
+# =============================================================================
+
+name: CI — ICU Edge-to-FHIR Gateway
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:  # Manual trigger for release validation
+
+env:
+  PYTHON_VERSION: "3.11"
+  MIN_COVERAGE:   "95"
+  MAX_IMAGE_MB:   "150"
+
+jobs:
+  # ─── Job 1: Static Analysis & Test Suite ─────────────────────────────────────
+  quality-gate:
+    name: Quality Gate (Ruff → Mypy → Bandit → pip-audit → pytest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install production and development dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+
+      # ── Step 1: Ruff Lint ────────────────────────────────────────────────────
+      - name: "Ruff — lint (IEC 62304 §5.5 code quality)"
+        run: ruff check src/ tests/
+
+      # ── Step 2: Mypy Type Check ──────────────────────────────────────────────
+      - name: "Mypy — strict type checking"
+        run: mypy src/
+
+      # ── Step 3: Bandit SAST ──────────────────────────────────────────────────
+      - name: "Bandit — static application security testing (IEC 81001-5-1)"
+        run: bandit --recursive src/ --level low --quiet
+
+      # ── Step 4: pip-audit Dependency Vulnerability Scan ─────────────────────
+      - name: "pip-audit — dependency CVE scan"
+        run: pip-audit --requirement requirements.txt --progress-spinner off
+
+      # ── Step 5: pytest with Coverage ─────────────────────────────────────────
+      - name: "pytest — full test suite (${{ env.MIN_COVERAGE }}% coverage gate)"
+        run: |
+          pytest \
+            --cov=src \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --cov-fail-under=${{ env.MIN_COVERAGE }} \
+            --tb=long \
+            -v
+
+      # ── Step 6: Upload Coverage (informational) ──────────────────────────────
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        if: ${{ !cancelled() }}
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+
+  # ─── Job 2: Docker Build, Size Check & Smoke Test ────────────────────────────
+  docker-build:
+    name: Docker Build — Alpine 3.19, Edge-Optimized (<${{ env.MAX_IMAGE_MB }}MB)
+    runs-on: ubuntu-latest
+    needs: quality-gate  # Only run if quality gate passes
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build runtime stage image
+        run: |
+          docker build \
+            --target runtime \
+            --tag icu-edge-fhir-gateway:ci \
+            --file Dockerfile \
+            .
+
+      # ── Size Enforcement ──────────────────────────────────────────────────────
+      - name: Verify image size < ${{ env.MAX_IMAGE_MB }} MB
+        run: |
+          SIZE_BYTES=$(docker image inspect icu-edge-fhir-gateway:ci --format='{{.Size}}')
+          SIZE_MB=$((SIZE_BYTES / 1024 / 1024))
+          MAX_MB=${{ env.MAX_IMAGE_MB }}
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "  Image size : ${SIZE_MB} MB"
+          echo "  Size limit : ${MAX_MB} MB"
+          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          if [ "${SIZE_MB}" -gt "${MAX_MB}" ]; then
+            echo "ERROR: Image (${SIZE_MB} MB) exceeds the ${MAX_MB} MB edge limit."
+            exit 1
+          fi
+          echo "PASSED: Image is within edge deployment size limit."
+
+      # ── Smoke Test — Health Endpoint ──────────────────────────────────────────
+      - name: Smoke test — GET /health returns status 'healthy'
+        run: |
+          docker run \
+            --detach \
+            --name gateway-smoke \
+            --publish 8000:8000 \
+            icu-edge-fhir-gateway:ci
+
+          # Wait for application startup (scipy imports take a moment on first run)
+          echo "Waiting for gateway startup..."
+          for i in $(seq 1 20); do
+            if curl --silent --fail http://localhost:8000/health > /dev/null 2>&1; then
+              echo "Gateway is up after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
+          # Validate health response
+          curl --fail --silent http://localhost:8000/health | \
+            python3 -c "
+          import json, sys
+          data = json.load(sys.stdin)
+          assert data['status'] == 'healthy', \
+            f\"Expected status='healthy', got {data['status']!r}\"
+          assert data['version'] == '1.0.0', \
+            f\"Expected version='1.0.0', got {data['version']!r}\"
+          assert data['uptime_seconds'] >= 0, \
+            f\"uptime_seconds must be non-negative, got {data['uptime_seconds']}\"
+          print(f\"Smoke test PASSED: status={data['status']}, \
+          version={data['version']}, \
+          uptime={data['uptime_seconds']}s\")
+          "
+
+          docker stop gateway-smoke
+
+      # ── Container Security Scan (Trivy) ───────────────────────────────────────
+      - name: Trivy container vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: icu-edge-fhir-gateway:ci
+          format: table
+          exit-code: "0"       # Warn — do not fail CI on Trivy findings in v1.0
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
