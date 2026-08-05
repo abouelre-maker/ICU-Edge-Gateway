@@ -20,11 +20,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-import pytest
-
 from domain.entities.news2_score import NEWS2RiskLevel, NEWS2Score
 from domain.entities.patient_context import PatientContext, SpO2Scale
-from domain.entities.vital_sign import AVPULevel, VitalSignSample, VitalSignType, VitalSignUnit
+from domain.entities.vital_sign import (
+    AVPULevel,
+    VitalSignSample,
+    VitalSignType,
+    VitalSignUnit,
+)
 from domain.services.news2_calculator import NEWS2Calculator
 from domain.services.signal_processor import VitalSignProcessor
 
@@ -44,13 +47,28 @@ def _vitals(
     avpu: AVPULevel = AVPULevel.ALERT,
 ):  # type: ignore[return]
     samples = [
-        VitalSignSample(VitalSignType.RESPIRATORY_RATE, rr, VitalSignUnit.BREATHS_PER_MIN, _TS),
+        VitalSignSample(
+            VitalSignType.RESPIRATORY_RATE, rr, VitalSignUnit.BREATHS_PER_MIN, _TS
+        ),
         VitalSignSample(VitalSignType.SPO2, spo2, VitalSignUnit.PERCENT, _TS),
         VitalSignSample(VitalSignType.SYSTOLIC_BP, sbp, VitalSignUnit.MMHG, _TS),
         VitalSignSample(VitalSignType.HEART_RATE, hr, VitalSignUnit.BPM, _TS),
-        VitalSignSample(VitalSignType.TEMPERATURE_CELSIUS, temp, VitalSignUnit.CELSIUS, _TS),
-        VitalSignSample(VitalSignType.SUPPLEMENTAL_O2, 1.0 if on_o2 else 0.0, VitalSignUnit.BOOLEAN, _TS),
-        VitalSignSample(VitalSignType.CONSCIOUSNESS, 0.0, VitalSignUnit.AVPU_SCALE, _TS, avpu_level=avpu),
+        VitalSignSample(
+            VitalSignType.TEMPERATURE_CELSIUS, temp, VitalSignUnit.CELSIUS, _TS
+        ),
+        VitalSignSample(
+            VitalSignType.SUPPLEMENTAL_O2,
+            1.0 if on_o2 else 0.0,
+            VitalSignUnit.BOOLEAN,
+            _TS,
+        ),
+        VitalSignSample(
+            VitalSignType.CONSCIOUSNESS,
+            0.0,
+            VitalSignUnit.AVPU_SCALE,
+            _TS,
+            avpu_level=avpu,
+        ),
     ]
     return [_PROC.process(s) for s in samples]
 

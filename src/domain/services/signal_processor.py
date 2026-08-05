@@ -28,13 +28,15 @@ from domain.services.artifact_rejector import (
 )
 
 # Vital sign types that support waveform processing (have bandpass ranges)
-_WAVEFORM_CAPABLE_TYPES: frozenset[VitalSignType] = frozenset({
-    VitalSignType.HEART_RATE,
-    VitalSignType.RESPIRATORY_RATE,
-    VitalSignType.SPO2,
-    VitalSignType.SYSTOLIC_BP,
-    VitalSignType.DIASTOLIC_BP,
-})
+_WAVEFORM_CAPABLE_TYPES: frozenset[VitalSignType] = frozenset(
+    {
+        VitalSignType.HEART_RATE,
+        VitalSignType.RESPIRATORY_RATE,
+        VitalSignType.SPO2,
+        VitalSignType.SYSTOLIC_BP,
+        VitalSignType.DIASTOLIC_BP,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -127,9 +129,7 @@ class VitalSignProcessor:
             # Stage 3: Bandpass (signal-type specific)
             if sample.vital_sign_type in _WAVEFORM_CAPABLE_TYPES:
                 try:
-                    bp_filter = BandpassFilter(
-                        vital_sign_type=sample.vital_sign_type
-                    )
+                    bp_filter = BandpassFilter(vital_sign_type=sample.vital_sign_type)
                     bandpassed = bp_filter.apply(notched, rate)
                     notes.append(
                         f"[BANDPASS] Applied for {sample.vital_sign_type.name}."

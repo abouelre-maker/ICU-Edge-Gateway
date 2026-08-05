@@ -11,9 +11,12 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
-
 from domain.entities.vital_sign import AVPULevel, VitalSignType
-from infrastructure.adapters.hl7v2_adapter import HL7v2Adapter, _parse_hl7_datetime, _parse_numeric
+from infrastructure.adapters.hl7v2_adapter import (
+    HL7v2Adapter,
+    _parse_hl7_datetime,
+    _parse_numeric,
+)
 
 _ADAPTER = HL7v2Adapter()
 
@@ -66,7 +69,7 @@ PARTIAL_ORU = (
     "MSH|^~\\&|GENERIC|ICU|EHR|HOSPITAL|20240115100000||ORU^R01|MSG005|P|2.5.1\r"
     "PID|1||PT-005\r"
     "OBX|1|NM|8867-4^HR^LN||72|/min|||||F|||20240115100000\r"
-    "OBX|2|NM|UNKNOWN_CODE^Unknown^MDC||||||||F\r"   # Unknown code, empty value
+    "OBX|2|NM|UNKNOWN_CODE^Unknown^MDC||||||||F\r"  # Unknown code, empty value
     "OBX|3|NM|8480-6^SBP^LN||120|mmHg|||||X|||20240115100000\r"  # Status X (entered-in-error) — skip
 )
 
@@ -98,12 +101,18 @@ class TestGenericLOINCParsing:
 
     def test_extracts_correct_hr_value(self) -> None:
         result = _ADAPTER.parse(GENERIC_ORU)
-        hr = next(s for s in result.samples if s.vital_sign_type is VitalSignType.HEART_RATE)
+        hr = next(
+            s for s in result.samples if s.vital_sign_type is VitalSignType.HEART_RATE
+        )
         assert hr.value == 72.0
 
     def test_extracts_correct_temperature(self) -> None:
         result = _ADAPTER.parse(GENERIC_ORU)
-        temp = next(s for s in result.samples if s.vital_sign_type is VitalSignType.TEMPERATURE_CELSIUS)
+        temp = next(
+            s
+            for s in result.samples
+            if s.vital_sign_type is VitalSignType.TEMPERATURE_CELSIUS
+        )
         assert temp.value == 37.0
 
     def test_extracts_patient_id(self) -> None:
@@ -112,6 +121,7 @@ class TestGenericLOINCParsing:
 
     def test_detects_generic_vendor(self) -> None:
         from domain.entities.device_context import MonitorVendor
+
         result = _ADAPTER.parse(GENERIC_ORU)
         assert result.detected_vendor is MonitorVendor.GENERIC
 
@@ -119,8 +129,7 @@ class TestGenericLOINCParsing:
         result = _ADAPTER.parse(GENERIC_ORU)
         for sample in result.samples:
             assert sample.timestamp.tzinfo is not None, (
-                "All timestamps must be timezone-aware. "
-                "ISO 14971 HAZARD-TIME-001."
+                "All timestamps must be timezone-aware. " "ISO 14971 HAZARD-TIME-001."
             )
 
     def test_zero_skipped_obx_on_clean_message(self) -> None:
@@ -133,6 +142,7 @@ class TestPhilipsVendorDialect:
 
     def test_detects_philips_vendor_from_msh3(self) -> None:
         from domain.entities.device_context import MonitorVendor
+
         result = _ADAPTER.parse(PHILIPS_ORU)
         assert result.detected_vendor is MonitorVendor.PHILIPS
 
@@ -149,7 +159,11 @@ class TestPhilipsVendorDialect:
     def test_philips_hr_value_correct(self) -> None:
         result = _ADAPTER.parse(PHILIPS_ORU)
         hr = next(
-            (s for s in result.samples if s.vital_sign_type is VitalSignType.HEART_RATE),
+            (
+                s
+                for s in result.samples
+                if s.vital_sign_type is VitalSignType.HEART_RATE
+            ),
             None,
         )
         assert hr is not None
@@ -162,7 +176,11 @@ class TestAVPUConsciousnessOBX:
     def test_parses_new_confusion_avpu(self) -> None:
         result = _ADAPTER.parse(AVPU_ORU)
         consciousness = next(
-            (s for s in result.samples if s.vital_sign_type is VitalSignType.CONSCIOUSNESS),
+            (
+                s
+                for s in result.samples
+                if s.vital_sign_type is VitalSignType.CONSCIOUSNESS
+            ),
             None,
         )
         assert consciousness is not None
@@ -174,11 +192,15 @@ class TestAVPUConsciousnessOBX:
     def test_parses_supplemental_o2_boolean(self) -> None:
         result = _ADAPTER.parse(AVPU_ORU)
         o2 = next(
-            (s for s in result.samples if s.vital_sign_type is VitalSignType.SUPPLEMENTAL_O2),
+            (
+                s
+                for s in result.samples
+                if s.vital_sign_type is VitalSignType.SUPPLEMENTAL_O2
+            ),
             None,
         )
         assert o2 is not None
-        assert o2.value == 1.0   # "1" → on O2
+        assert o2.value == 1.0  # "1" → on O2
 
 
 class TestWaveformHandling:
@@ -195,7 +217,9 @@ class TestWaveformHandling:
 
     def test_numeric_obx_after_waveform_still_parses(self) -> None:
         result = _ADAPTER.parse(WAVEFORM_ORU)
-        hr_samples = [s for s in result.samples if s.vital_sign_type is VitalSignType.HEART_RATE]
+        hr_samples = [
+            s for s in result.samples if s.vital_sign_type is VitalSignType.HEART_RATE
+        ]
         assert len(hr_samples) == 1, (
             "NM OBX after NA OBX must still be parsed. "
             "IEC 62304 REQ-HL7-003: one bad segment must not abort the message."
@@ -218,7 +242,8 @@ class TestPartialAndErrorHandling:
         result = _ADAPTER.parse(PARTIAL_ORU)
         # SBP from the X-status OBX must not appear
         sbp_values = [
-            s.value for s in result.samples
+            s.value
+            for s in result.samples
             if s.vital_sign_type is VitalSignType.SYSTOLIC_BP
         ]
         assert not sbp_values, "X-status OBX must not produce a VitalSignSample."
@@ -255,7 +280,6 @@ class TestParseHL7Datetime:
         dt = _parse_hl7_datetime("20240115100000+0500")
         # Should convert to offset-aware
         assert dt.tzinfo is not None
-        from datetime import timedelta
         # UTC equivalent is 05:00:00
         utc_equivalent = dt.utctimetuple()
         assert utc_equivalent.tm_hour == 5
@@ -278,15 +302,18 @@ class TestParseHL7Datetime:
 
 
 class TestParseNumeric:
-    @pytest.mark.parametrize(("raw", "expected"), [
-        ("72", 72.0),
-        ("98.6", 98.6),
-        (">100", 100.0),        # SN comparison operator stripped
-        ("^72", 72.0),          # SN caret-component
-        ("72^100", 72.0),       # SN range — first component
-        ("72bpm", 72.0),        # Trailing unit suffix
-        ("-5.5", -5.5),         # Negative value
-    ])
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            ("72", 72.0),
+            ("98.6", 98.6),
+            (">100", 100.0),  # SN comparison operator stripped
+            ("^72", 72.0),  # SN caret-component
+            ("72^100", 72.0),  # SN range — first component
+            ("72bpm", 72.0),  # Trailing unit suffix
+            ("-5.5", -5.5),  # Negative value
+        ],
+    )
     def test_numeric_parsing(self, raw: str, expected: float) -> None:
         result = _parse_numeric(raw)
         assert result is not None

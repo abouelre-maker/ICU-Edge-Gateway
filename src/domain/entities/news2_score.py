@@ -166,7 +166,7 @@ class NEWS2Score:
         return NEWS2RiskLevel.NORMAL
 
     @classmethod
-    def zero(cls) -> "NEWS2Score":
+    def zero(cls) -> NEWS2Score:
         """
         Factory: a fully-normal NEWS2Score (all parameters within target range).
         Useful as a safe default in test fixtures.

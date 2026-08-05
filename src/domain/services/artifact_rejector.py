@@ -10,6 +10,7 @@ Implements signal processing filters for ICU vital sign waveforms and numeric va
 from __future__ import annotations
 
 from dataclasses import dataclass
+
 import numpy as np
 from scipy.signal import butter, filtfilt, iirnotch
 
@@ -27,7 +28,7 @@ class DualNotchFilter(IFilterStrategy):
     def apply(self, signal: np.ndarray, sampling_rate_hz: float) -> np.ndarray:
         if signal is None or len(signal) == 0:
             raise ValueError("Signal is too short")
-            
+
         if len(signal) < 15:
             raise ValueError("Signal too short for notch filter processing.")
         if sampling_rate_hz <= 0:
@@ -35,7 +36,7 @@ class DualNotchFilter(IFilterStrategy):
 
         nyquist = sampling_rate_hz / 2.0
         output = signal.astype(np.float64, copy=True)
-        
+
         # تحديد طول البطانة (Padding) لتجنب تشوه الحواف أثناء الفلترة
         padlen = min(150, len(output) - 1)
 
@@ -87,7 +88,9 @@ class BandpassFilter:
                 f"Signal length ({len(signal)}) too short for bandpass order {self.order}."
             )
 
-        b, a = butter(N=self.order, Wn=[low, high], btype="bandpass", fs=sampling_rate_hz)
+        b, a = butter(
+            N=self.order, Wn=[low, high], btype="bandpass", fs=sampling_rate_hz
+        )
         padlen = min(150, len(signal) - 1)
         return filtfilt(b, a, signal.astype(np.float64), padlen=padlen)
 
@@ -121,11 +124,8 @@ class HampelFilter(IFilterStrategy):
             mad = float(np.median(np.abs(window - med)))
             threshold = self.n_sigma * 1.4826 * mad
 
-            diff = abs(signal[i] - med)
-            if mad == 0:
-                is_outlier = diff > 1e-6
-            else:
-                is_outlier = diff > threshold
+            diff: float = abs(signal[i] - med)
+            is_outlier = diff > 1e-6 if mad == 0 else diff > threshold
 
             if is_outlier:
                 output[i] = med

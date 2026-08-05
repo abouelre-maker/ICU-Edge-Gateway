@@ -23,14 +23,14 @@ class VitalSignType(str, Enum):
     and a new traceability entry in regulatory/risk_register.xlsx.
     """
 
-    HEART_RATE = "HEART_RATE"                      # NEWS2-P  : Pulse (bpm)
-    RESPIRATORY_RATE = "RESPIRATORY_RATE"          # NEWS2-RR : Respirations/min
-    SPO2 = "SPO2"                                  # NEWS2-O2 : Peripheral O2 sat (%)
-    SYSTOLIC_BP = "SYSTOLIC_BP"                    # NEWS2-BP : Systolic BP (mmHg)
-    DIASTOLIC_BP = "DIASTOLIC_BP"                  # Audit only — not in NEWS2
-    TEMPERATURE_CELSIUS = "TEMPERATURE_CELSIUS"    # NEWS2-T  : Temperature (°C)
-    CONSCIOUSNESS = "CONSCIOUSNESS"                # NEWS2-A  : AVPU level
-    SUPPLEMENTAL_O2 = "SUPPLEMENTAL_O2"            # NEWS2-O2 : Air vs. O2 flag
+    HEART_RATE = "HEART_RATE"  # NEWS2-P  : Pulse (bpm)
+    RESPIRATORY_RATE = "RESPIRATORY_RATE"  # NEWS2-RR : Respirations/min
+    SPO2 = "SPO2"  # NEWS2-O2 : Peripheral O2 sat (%)
+    SYSTOLIC_BP = "SYSTOLIC_BP"  # NEWS2-BP : Systolic BP (mmHg)
+    DIASTOLIC_BP = "DIASTOLIC_BP"  # Audit only — not in NEWS2
+    TEMPERATURE_CELSIUS = "TEMPERATURE_CELSIUS"  # NEWS2-T  : Temperature (°C)
+    CONSCIOUSNESS = "CONSCIOUSNESS"  # NEWS2-A  : AVPU level
+    SUPPLEMENTAL_O2 = "SUPPLEMENTAL_O2"  # NEWS2-O2 : Air vs. O2 flag
 
 
 class VitalSignUnit(str, Enum):
@@ -40,10 +40,10 @@ class VitalSignUnit(str, Enum):
     BREATHS_PER_MIN = "breaths/min"
     PERCENT = "%"
     MMHG = "mmHg"
-    CELSIUS = "Cel"        # UCUM canonical: "Cel" not "°C"
+    CELSIUS = "Cel"  # UCUM canonical: "Cel" not "°C"
     FAHRENHEIT = "[degF]"  # UCUM canonical
-    BOOLEAN = "bool"       # SUPPLEMENTAL_O2: 1.0 = on O2, 0.0 = on air
-    AVPU_SCALE = "avpu"    # CONSCIOUSNESS: encoded via AVPULevel enum
+    BOOLEAN = "bool"  # SUPPLEMENTAL_O2: 1.0 = on O2, 0.0 = on air
+    AVPU_SCALE = "avpu"  # CONSCIOUSNESS: encoded via AVPULevel enum
 
 
 class AVPULevel(str, Enum):
@@ -79,12 +79,12 @@ class VitalSignSample:
     vital_sign_type: VitalSignType
     value: float
     unit: VitalSignUnit
-    timestamp: datetime                          # MUST be timezone-aware (UTC)
-    avpu_level: AVPULevel | None = None          # Required for CONSCIOUSNESS type
-    waveform: tuple[float, ...] | None = None    # Raw waveform from HL7 ED/NA OBX
-    sampling_rate_hz: float | None = None        # Required when waveform is set
+    timestamp: datetime  # MUST be timezone-aware (UTC)
+    avpu_level: AVPULevel | None = None  # Required for CONSCIOUSNESS type
+    waveform: tuple[float, ...] | None = None  # Raw waveform from HL7 ED/NA OBX
+    sampling_rate_hz: float | None = None  # Required when waveform is set
     is_artifact_flagged: bool = False
-    device_id: str | None = None                 # FHIR Device/{id} reference
+    device_id: str | None = None  # FHIR Device/{id} reference
 
     def __post_init__(self) -> None:
         """

@@ -45,13 +45,15 @@ class NEWS2InsufficientDataError(Exception):
 
 # Required VitalSignTypes for a complete NEWS2 calculation.
 # Supplemental O2 and Consciousness default safely when absent.
-_REQUIRED_VITAL_TYPES: frozenset[VitalSignType] = frozenset({
-    VitalSignType.RESPIRATORY_RATE,
-    VitalSignType.SPO2,
-    VitalSignType.SYSTOLIC_BP,
-    VitalSignType.HEART_RATE,
-    VitalSignType.TEMPERATURE_CELSIUS,
-})
+_REQUIRED_VITAL_TYPES: frozenset[VitalSignType] = frozenset(
+    {
+        VitalSignType.RESPIRATORY_RATE,
+        VitalSignType.SPO2,
+        VitalSignType.SYSTOLIC_BP,
+        VitalSignType.HEART_RATE,
+        VitalSignType.TEMPERATURE_CELSIUS,
+    }
+)
 
 
 class NEWS2Calculator:
@@ -106,7 +108,7 @@ class NEWS2Calculator:
         # Consciousness defaults to Alert (conservative: 0 points)
         avpu = self._extract_avpu(vitals)
 
-        assert rr is not None   # guaranteed by _assert_required_parameters_present
+        assert rr is not None  # guaranteed by _assert_required_parameters_present
         assert spo2 is not None
         assert sbp is not None
         assert hr is not None
@@ -141,7 +143,9 @@ class NEWS2Calculator:
         )
         missing = _REQUIRED_VITAL_TYPES - available
         if missing:
-            missing_names = ", ".join(t.name for t in sorted(missing, key=lambda x: x.value))
+            missing_names = ", ".join(
+                t.name for t in sorted(missing, key=lambda x: x.value)
+            )
             raise NEWS2InsufficientDataError(
                 f"NEWS2 calculation requires: {missing_names}. "
                 "None of these vital signs were present in the processed vitals, "
@@ -161,7 +165,8 @@ class NEWS2Calculator:
         Returns None if no valid sample exists for the requested type.
         """
         candidates = [
-            v for v in vitals
+            v
+            for v in vitals
             if v.original.vital_sign_type is vital_type
             and v.is_within_physiological_bounds
         ]
@@ -178,7 +183,8 @@ class NEWS2Calculator:
         never inflating the score beyond what is clinically supported.
         """
         candidates = [
-            v for v in vitals
+            v
+            for v in vitals
             if v.original.vital_sign_type is VitalSignType.CONSCIOUSNESS
             and v.original.avpu_level is not None
         ]
@@ -198,7 +204,8 @@ class NEWS2Calculator:
         (supplemental O2 adds +2; defaulting to False avoids false escalation).
         """
         candidates = [
-            v for v in vitals
+            v
+            for v in vitals
             if v.original.vital_sign_type is VitalSignType.SUPPLEMENTAL_O2
         ]
         if not candidates:
