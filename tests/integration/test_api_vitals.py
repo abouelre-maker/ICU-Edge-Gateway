@@ -67,12 +67,37 @@ FULL_VITALS = {
 HIGH_RISK_VITALS = {
     "patient_id": "PT-HIGH-001",
     "samples": [
-        {"vital_sign_type": "HEART_RATE", "value": 140.0, "unit": "bpm", "timestamp": _TS},
-        {"vital_sign_type": "RESPIRATORY_RATE", "value": 28.0, "unit": "breaths/min", "timestamp": _TS},
+        {
+            "vital_sign_type": "HEART_RATE",
+            "value": 140.0,
+            "unit": "bpm",
+            "timestamp": _TS,
+        },
+        {
+            "vital_sign_type": "RESPIRATORY_RATE",
+            "value": 28.0,
+            "unit": "breaths/min",
+            "timestamp": _TS,
+        },
         {"vital_sign_type": "SPO2", "value": 89.0, "unit": "%", "timestamp": _TS},
-        {"vital_sign_type": "SYSTOLIC_BP", "value": 85.0, "unit": "mmHg", "timestamp": _TS},
-        {"vital_sign_type": "TEMPERATURE_CELSIUS", "value": 39.5, "unit": "Cel", "timestamp": _TS},
-        {"vital_sign_type": "SUPPLEMENTAL_O2", "value": 1.0, "unit": "bool", "timestamp": _TS},
+        {
+            "vital_sign_type": "SYSTOLIC_BP",
+            "value": 85.0,
+            "unit": "mmHg",
+            "timestamp": _TS,
+        },
+        {
+            "vital_sign_type": "TEMPERATURE_CELSIUS",
+            "value": 39.5,
+            "unit": "Cel",
+            "timestamp": _TS,
+        },
+        {
+            "vital_sign_type": "SUPPLEMENTAL_O2",
+            "value": 1.0,
+            "unit": "bool",
+            "timestamp": _TS,
+        },
         {
             "vital_sign_type": "CONSCIOUSNESS",
             "value": 0.0,
@@ -88,7 +113,12 @@ HIGH_RISK_VITALS = {
 PARTIAL_VITALS = {
     "patient_id": "PT-PARTIAL-001",
     "samples": [
-        {"vital_sign_type": "HEART_RATE", "value": 72.0, "unit": "bpm", "timestamp": _TS},
+        {
+            "vital_sign_type": "HEART_RATE",
+            "value": 72.0,
+            "unit": "bpm",
+            "timestamp": _TS,
+        },
         {"vital_sign_type": "SPO2", "value": 98.0, "unit": "%", "timestamp": _TS},
     ],
 }
@@ -109,8 +139,7 @@ COPD_VITALS = {
     "patient_id": "PT-COPD-001",
     "spo2_scale": "SCALE_2",
     "samples": [
-        s if s["vital_sign_type"] != "SPO2"
-        else {**s, "value": 90.0}
+        s if s["vital_sign_type"] != "SPO2" else {**s, "value": 90.0}
         for s in FULL_VITALS["samples"]
     ],
 }
@@ -134,13 +163,12 @@ class TestVitalsEndpointSuccess:
         response = await client.post("/api/v1/vitals", json=FULL_VITALS)
         assert "timestamp" in response.json()
 
-    async def test_bundle_contains_news2_observation(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_bundle_contains_news2_observation(self, client: AsyncClient) -> None:
         response = await client.post("/api/v1/vitals", json=FULL_VITALS)
         entries = response.json()["entry"]
         news2_entries = [
-            e for e in entries
+            e
+            for e in entries
             if e["resource"]["resourceType"] == "Observation"
             and any(
                 c.get("code") == "1239842005"
@@ -163,16 +191,14 @@ class TestVitalsEndpointSuccess:
         assert response.status_code == 200
         total = response.headers.get("x-news2-total")
         risk = response.headers.get("x-news2-risk-level")
-        assert total == "0", (
-            f"All-normal vitals must produce NEWS2 total=0. Got '{total}'."
-        )
-        assert risk == "NORMAL", (
-            f"All-normal vitals must produce NORMAL risk. Got '{risk}'."
-        )
+        assert (
+            total == "0"
+        ), f"All-normal vitals must produce NEWS2 total=0. Got '{total}'."
+        assert (
+            risk == "NORMAL"
+        ), f"All-normal vitals must produce NORMAL risk. Got '{risk}'."
 
-    async def test_news2_high_for_deranged_vitals(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_news2_high_for_deranged_vitals(self, client: AsyncClient) -> None:
         """
         High-risk scenario must produce NEWS2 risk level HIGH.
         HR=140, RR=28, SpO2=89%, SBP=85, Temp=39.5, O2, V consciousness.
@@ -192,9 +218,7 @@ class TestVitalsEndpointSuccess:
             "FDA CDS Non-Device Exemption."
         )
 
-    async def test_pipeline_duration_header_present(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_pipeline_duration_header_present(self, client: AsyncClient) -> None:
         response = await client.post("/api/v1/vitals", json=FULL_VITALS)
         assert "x-pipeline-duration-ms" in response.headers
 
@@ -204,8 +228,7 @@ class TestVitalsEndpointSuccess:
         response = await client.post("/api/v1/vitals", json=FULL_VITALS)
         entries = response.json()["entry"]
         obs_entries = [
-            e for e in entries
-            if e["resource"]["resourceType"] == "Observation"
+            e for e in entries if e["resource"]["resourceType"] == "Observation"
         ]
         for entry in obs_entries:
             subject = entry["resource"]["subject"]["reference"]
@@ -218,8 +241,7 @@ class TestVitalsEndpointSuccess:
         assert response.status_code == 200
         entries = response.json()["entry"]
         device_entries = [
-            e for e in entries
-            if e["resource"]["resourceType"] == "Device"
+            e for e in entries if e["resource"]["resourceType"] == "Device"
         ]
         assert len(device_entries) == 1
         assert device_entries[0]["resource"]["manufacturer"] == "PHILIPS"
@@ -248,7 +270,8 @@ class TestVitalsEndpointSuccess:
         assert response.status_code == 200
         entries = response.json()["entry"]
         news2_entries = [
-            e for e in entries
+            e
+            for e in entries
             if e["resource"]["resourceType"] == "Observation"
             and any(
                 c.get("code") == "1239842005"
@@ -271,8 +294,18 @@ class TestVitalsEndpointSuccess:
         bad_hr_payload = {
             "patient_id": "PT-OOB-001",
             "samples": [
-                {"vital_sign_type": "HEART_RATE", "value": 5.0, "unit": "bpm", "timestamp": _TS},
-                {"vital_sign_type": "SPO2", "value": 98.0, "unit": "%", "timestamp": _TS},
+                {
+                    "vital_sign_type": "HEART_RATE",
+                    "value": 5.0,
+                    "unit": "bpm",
+                    "timestamp": _TS,
+                },
+                {
+                    "vital_sign_type": "SPO2",
+                    "value": 98.0,
+                    "unit": "%",
+                    "timestamp": _TS,
+                },
             ],
         }
         response = await client.post("/api/v1/vitals", json=bad_hr_payload)
@@ -283,25 +316,19 @@ class TestVitalsEndpointSuccess:
 class TestVitalsValidationErrors:
     """POST /api/v1/vitals — Pydantic validation error scenarios (expect HTTP 422)."""
 
-    async def test_missing_patient_id_returns_422(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_missing_patient_id_returns_422(self, client: AsyncClient) -> None:
         payload = {k: v for k, v in FULL_VITALS.items() if k != "patient_id"}
         response = await client.post("/api/v1/vitals", json=payload)
         assert response.status_code == 422
 
-    async def test_empty_patient_id_returns_422(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_empty_patient_id_returns_422(self, client: AsyncClient) -> None:
         response = await client.post(
             "/api/v1/vitals",
             json={**FULL_VITALS, "patient_id": ""},
         )
         assert response.status_code == 422
 
-    async def test_empty_samples_list_returns_422(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_empty_samples_list_returns_422(self, client: AsyncClient) -> None:
         response = await client.post(
             "/api/v1/vitals",
             json={**FULL_VITALS, "samples": []},
@@ -366,9 +393,7 @@ class TestVitalsValidationErrors:
         )
         assert response.status_code == 422
 
-    async def test_invalid_spo2_scale_returns_422(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_invalid_spo2_scale_returns_422(self, client: AsyncClient) -> None:
         response = await client.post(
             "/api/v1/vitals",
             json={**FULL_VITALS, "spo2_scale": "SCALE_99"},

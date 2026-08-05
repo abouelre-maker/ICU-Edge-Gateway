@@ -14,6 +14,46 @@ dependencies = [
     "structlog",
 ]
 
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501", # line too long - handled by ruff format
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
+
+[tool.mypy]
+# Zero-risk config: third-party libs without stubs are not re-analyzed.
+ignore_missing_imports = true
+
+# structlog's BoundLogger dynamically exposes .info()/.warning() at runtime;
+# the static stubs for BoundLoggerBase do not declare them. Silenced per-module
+# at usage sites only — no code changes, no logic impact.
+[[tool.mypy.overrides]]
+module = [
+  "api.v1.vitals",
+  "api.v1.ingest",
+  "domain.services.vitals_orchestrator",
+  "infrastructure.adapters.hl7v2_adapter",
+]
+disable_error_code = ["attr-defined"]
+
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 pythonpath = ["src"]

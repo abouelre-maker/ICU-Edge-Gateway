@@ -12,19 +12,23 @@ The Pydantic model enforces this at the API boundary.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Annotated, Any
+from datetime import datetime
+from typing import Any
 
 import structlog
-from fastapi import APIRouter, status
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-
 from domain.entities.device_context import DeviceContext, MonitorVendor
 from domain.entities.patient_context import PatientContext, SpO2Scale
-from domain.entities.vital_sign import AVPULevel, VitalSignSample, VitalSignType, VitalSignUnit
+from domain.entities.vital_sign import (
+    AVPULevel,
+    VitalSignSample,
+    VitalSignType,
+    VitalSignUnit,
+)
 from domain.services.vitals_orchestrator import VitalsOrchestrator
+from fastapi import APIRouter, status
+from fastapi.responses import JSONResponse
 from infrastructure.fhir.bundle_assembler import BundleAssembler
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -120,7 +124,7 @@ class VitalSignPayload(BaseModel):
         raise ValueError(f"Unsupported timestamp type: {type(v).__name__}")
 
     @model_validator(mode="after")
-    def validate_consciousness_has_avpu(self) -> "VitalSignPayload":
+    def validate_consciousness_has_avpu(self) -> VitalSignPayload:
         """
         ISO 14971 HAZARD-CON-001: CONSCIOUSNESS samples must carry avpu_level.
         Enforced at the API boundary — before domain VitalSignSample is constructed.
@@ -282,8 +286,7 @@ async def ingest_vitals(
     log.info(
         "api.vitals.complete",
         news2_total=(
-            analysis_result.news2_score.total
-            if analysis_result.news2_score else None
+            analysis_result.news2_score.total if analysis_result.news2_score else None
         ),
         duration_ms=round(analysis_result.processing_duration_ms, 2),
     )
@@ -291,9 +294,7 @@ async def ingest_vitals(
     # Build response headers
     headers: dict[str, str] = {
         "X-CDS-Advisory-Only": "true",
-        "X-Pipeline-Duration-Ms": str(
-            round(analysis_result.processing_duration_ms, 2)
-        ),
+        "X-Pipeline-Duration-Ms": str(round(analysis_result.processing_duration_ms, 2)),
         "X-Warning-Count": str(len(analysis_result.pipeline_warnings)),
     }
     if analysis_result.news2_score is not None:

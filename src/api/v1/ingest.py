@@ -21,12 +21,11 @@ from __future__ import annotations
 from typing import Annotated
 
 import structlog
-from fastapi import APIRouter, HTTPException, Query, Request, status
-from fastapi.responses import JSONResponse
-
 from domain.entities.device_context import DeviceContext, HL7Version, MonitorVendor
 from domain.entities.patient_context import PatientContext, SpO2Scale
 from domain.services.vitals_orchestrator import VitalsOrchestrator
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
 from infrastructure.adapters.hl7v2_adapter import HL7v2Adapter
 from infrastructure.fhir.bundle_assembler import BundleAssembler
 
@@ -99,15 +98,21 @@ async def ingest_hl7(
     ] = SpO2Scale.SCALE_1,
     encounter_id: Annotated[
         str | None,
-        Query(description="FHIR Encounter logical ID. Populates Observation.encounter."),
+        Query(
+            description="FHIR Encounter logical ID. Populates Observation.encounter."
+        ),
     ] = None,
     device_id: Annotated[
         str | None,
-        Query(description="FHIR Device logical ID override. Auto-detected from MSH-3 if absent."),
+        Query(
+            description="FHIR Device logical ID override. Auto-detected from MSH-3 if absent."
+        ),
     ] = None,
     device_vendor: Annotated[
         MonitorVendor | None,
-        Query(description="Monitor vendor override. Auto-detected from MSH-3 if absent."),
+        Query(
+            description="Monitor vendor override. Auto-detected from MSH-3 if absent."
+        ),
     ] = None,
     device_model: Annotated[
         str | None,
@@ -163,7 +168,10 @@ async def ingest_hl7(
 
     # Build final DeviceContext from parsed result or provided override
     device_context: DeviceContext | None = device_context_hint
-    if device_context is None and parse_result.detected_vendor is not MonitorVendor.GENERIC:
+    if (
+        device_context is None
+        and parse_result.detected_vendor is not MonitorVendor.GENERIC
+    ):
         device_context = DeviceContext(
             device_id=device_id or f"DEVICE-{parse_result.detected_vendor.value}",
             vendor=parse_result.detected_vendor,
@@ -190,7 +198,9 @@ async def ingest_hl7(
         patient_id=parse_result.patient_id,
         sample_count=len(parse_result.samples),
         skipped_obx=parse_result.skipped_obx_count,
-        news2_total=analysis_result.news2_score.total if analysis_result.news2_score else None,
+        news2_total=analysis_result.news2_score.total
+        if analysis_result.news2_score
+        else None,
         duration_ms=round(analysis_result.processing_duration_ms, 2),
     )
 
@@ -208,7 +218,9 @@ def _pipeline_headers(result: object) -> dict[str, str]:
     These headers allow monitoring systems (Prometheus, Grafana) to track
     NEWS2 risk levels and processing latency without parsing FHIR Bundles.
     """
-    from domain.services.vitals_orchestrator import VitalsAnalysisResult  # noqa: PLC0415
+    from domain.services.vitals_orchestrator import (
+        VitalsAnalysisResult,  # noqa: PLC0415
+    )
 
     if not isinstance(result, VitalsAnalysisResult):
         return {"X-CDS-Advisory-Only": "true"}

@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
-
 from domain.entities.vital_sign import VitalSignType
 from domain.services.artifact_rejector import (
     BandpassFilter,
@@ -33,29 +32,28 @@ class TestDualNotchFilter:
         sig = _pure_sine(60.0)
         f = DualNotchFilter()
         filtered = f.apply(sig, _FS)
-        original_rms = float(np.sqrt(np.mean(sig ** 2)))
-        filtered_rms = float(np.sqrt(np.mean(filtered ** 2)))
+        original_rms = float(np.sqrt(np.mean(sig**2)))
+        filtered_rms = float(np.sqrt(np.mean(filtered**2)))
         assert filtered_rms < original_rms * 0.05, (
-            "60 Hz notch must attenuate RMS by >95% (≥26 dB). "
-            "IEC 62304 REQ-DSP-001."
+            "60 Hz notch must attenuate RMS by >95% (≥26 dB). " "IEC 62304 REQ-DSP-001."
         )
 
     def test_attenuates_50hz_signal(self) -> None:
         sig = _pure_sine(50.0)
         f = DualNotchFilter()
         filtered = f.apply(sig, _FS)
-        original_rms = float(np.sqrt(np.mean(sig ** 2)))
-        filtered_rms = float(np.sqrt(np.mean(filtered ** 2)))
-        assert filtered_rms < original_rms * 0.05, (
-            "50 Hz notch must attenuate RMS by >95%."
-        )
+        original_rms = float(np.sqrt(np.mean(sig**2)))
+        filtered_rms = float(np.sqrt(np.mean(filtered**2)))
+        assert (
+            filtered_rms < original_rms * 0.05
+        ), "50 Hz notch must attenuate RMS by >95%."
 
     def test_preserves_10hz_content(self) -> None:
         sig = _pure_sine(10.0)
         f = DualNotchFilter()
         filtered = f.apply(sig, _FS)
-        original_rms = float(np.sqrt(np.mean(sig ** 2)))
-        filtered_rms = float(np.sqrt(np.mean(filtered ** 2)))
+        original_rms = float(np.sqrt(np.mean(sig**2)))
+        filtered_rms = float(np.sqrt(np.mean(filtered**2)))
         # 10 Hz content should be >90% preserved after notch filter
         assert filtered_rms > original_rms * 0.90, (
             "Notch filter must not attenuate 10 Hz content. "
@@ -100,11 +98,11 @@ class TestBandpassFilter:
         sig = _pure_sine(10.0)  # 10 Hz — within HEART_RATE passband (0.5–40 Hz)
         f = BandpassFilter(vital_sign_type=VitalSignType.HEART_RATE)
         filtered = f.apply(sig, _FS)
-        original_rms = float(np.sqrt(np.mean(sig ** 2)))
-        filtered_rms = float(np.sqrt(np.mean(filtered ** 2)))
-        assert filtered_rms > original_rms * 0.85, (
-            "Bandpass must pass >85% of in-band 10 Hz content."
-        )
+        original_rms = float(np.sqrt(np.mean(sig**2)))
+        filtered_rms = float(np.sqrt(np.mean(filtered**2)))
+        assert (
+            filtered_rms > original_rms * 0.85
+        ), "Bandpass must pass >85% of in-band 10 Hz content."
 
     def test_raises_for_non_waveform_type(self) -> None:
         with pytest.raises(ValueError, match="no configured bandpass range"):
@@ -200,11 +198,13 @@ class TestPhysiologicalBoundsChecker:
     def test_consciousness_has_no_bounds_check(self) -> None:
         checker = PhysiologicalBoundsChecker()
         ok, note = checker.check(VitalSignType.CONSCIOUSNESS, 0.0)
-        assert ok   # No bounds configured → always passes
+        assert ok  # No bounds configured → always passes
         assert note == ""
 
     def test_sbp_220_is_out_of_bounds(self) -> None:
         """SBP 220 is within NEWS2 scoring but NOT beyond physiological bounds (300)."""
         checker = PhysiologicalBoundsChecker()
         ok, _ = checker.check(VitalSignType.SYSTOLIC_BP, 220.0)
-        assert ok, "SBP=220 is within physiological bounds (max=300). NEWS2 should score it."
+        assert (
+            ok
+        ), "SBP=220 is within physiological bounds (max=300). NEWS2 should score it."

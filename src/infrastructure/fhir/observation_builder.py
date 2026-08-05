@@ -42,7 +42,9 @@ _SW_VERSION: Final = "1.0.0"
 # Vital sign FHIR coding table.
 # Each entry: (loinc_code, loinc_display, snomed_code, snomed_display, ucum_code, ucum_unit_display)
 # ISO 14971 HAZARD-FHIR-001: These codes are the primary risk control for EHR interoperability.
-_VITAL_SIGN_FHIR_MAP: Final[dict[VitalSignType, tuple[str, str, str, str, str, str]]] = {
+_VITAL_SIGN_FHIR_MAP: Final[
+    dict[VitalSignType, tuple[str, str, str, str, str, str]]
+] = {
     VitalSignType.HEART_RATE: (
         "8867-4",
         "Heart rate",
@@ -96,7 +98,7 @@ _VITAL_SIGN_FHIR_MAP: Final[dict[VitalSignType, tuple[str, str, str, str, str, s
         "Level of responsiveness",
         "248234008",
         "Neurological state finding (finding)",
-        "",    # No UCUM unit for categorical value
+        "",  # No UCUM unit for categorical value
         "",
     ),
     VitalSignType.SUPPLEMENTAL_O2: (
@@ -104,7 +106,7 @@ _VITAL_SIGN_FHIR_MAP: Final[dict[VitalSignType, tuple[str, str, str, str, str, s
         "Oxygen therapy",
         "371825009",
         "Patient on oxygen (finding)",
-        "",    # Boolean — no UCUM unit
+        "",  # Boolean — no UCUM unit
         "",
     ),
 }

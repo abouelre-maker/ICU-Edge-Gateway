@@ -21,7 +21,12 @@ import uuid
 from typing import Any, Final
 
 from domain.entities.news2_score import NEWS2RiskLevel, NEWS2Score
-from infrastructure.fhir.observation_builder import _LOINC_SYS, _SNOMED_SYS, _format_fhir_datetime
+
+from infrastructure.fhir.observation_builder import (
+    _LOINC_SYS,
+    _SNOMED_SYS,
+    _format_fhir_datetime,
+)
 
 # NEWS2 primary FHIR coding
 _NEWS2_SNOMED_CODE: Final = "1239842005"
@@ -32,7 +37,7 @@ _NEWS2_CAT_SYS: Final = "http://terminology.hl7.org/CodeSystem/observation-categ
 _RISK_INTERPRETATION: Final[dict[NEWS2RiskLevel, tuple[str, str]]] = {
     NEWS2RiskLevel.NORMAL: ("N", "Normal"),
     NEWS2RiskLevel.LOW: ("L", "Low"),
-    NEWS2RiskLevel.LOW_MEDIUM: ("A", "Abnormal"),       # Closest HL7 standard code
+    NEWS2RiskLevel.LOW_MEDIUM: ("A", "Abnormal"),  # Closest HL7 standard code
     NEWS2RiskLevel.MEDIUM: ("H", "High"),
     NEWS2RiskLevel.HIGH: ("HH", "Critical high"),
 }
@@ -247,7 +252,13 @@ class NEWS2ObservationBuilder:
         }
 
         components: list[dict[str, Any]] = []
-        for comp_id, loinc_code, loinc_display, snomed_code, snomed_display in _COMPONENT_CODES:
+        for (
+            comp_id,
+            loinc_code,
+            loinc_display,
+            snomed_code,
+            snomed_display,
+        ) in _COMPONENT_CODES:
             components.append(
                 {
                     "code": {

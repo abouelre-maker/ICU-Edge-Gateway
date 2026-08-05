@@ -27,8 +27,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Final
 
 import structlog
-from hl7apy.parser import parse_message as _hl7apy_parse
-
 from domain.entities.device_context import DeviceContext, MonitorVendor
 from domain.entities.vital_sign import (
     AVPULevel,
@@ -36,6 +34,7 @@ from domain.entities.vital_sign import (
     VitalSignType,
     VitalSignUnit,
 )
+from hl7apy.parser import parse_message as _hl7apy_parse
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -44,17 +43,17 @@ _log: structlog.BoundLogger = structlog.get_logger(__name__)
 # LOINC observation identifiers → VitalSignType.
 # Source: LOINC.org — codes validated against NLM VSAC value sets.
 _LOINC_TO_TYPE: Final[dict[str, VitalSignType]] = {
-    "8867-4": VitalSignType.HEART_RATE,          # Heart rate
-    "59408-5": VitalSignType.SPO2,               # SpO2 by pulse ox
-    "2708-6": VitalSignType.SPO2,                # Oxygen saturation (alternate)
-    "9279-1": VitalSignType.RESPIRATORY_RATE,    # Respiratory rate
-    "8480-6": VitalSignType.SYSTOLIC_BP,         # Systolic BP
-    "8462-4": VitalSignType.DIASTOLIC_BP,        # Diastolic BP
-    "8310-5": VitalSignType.TEMPERATURE_CELSIUS, # Body temperature
-    "67775-7": VitalSignType.CONSCIOUSNESS,      # Level of responsiveness
-    "76270-8": VitalSignType.CONSCIOUSNESS,      # AVPU score
-    "57834-7": VitalSignType.SUPPLEMENTAL_O2,    # Oxygen therapy
-    "3151-8": VitalSignType.SUPPLEMENTAL_O2,     # Inhaled O2 flow rate
+    "8867-4": VitalSignType.HEART_RATE,  # Heart rate
+    "59408-5": VitalSignType.SPO2,  # SpO2 by pulse ox
+    "2708-6": VitalSignType.SPO2,  # Oxygen saturation (alternate)
+    "9279-1": VitalSignType.RESPIRATORY_RATE,  # Respiratory rate
+    "8480-6": VitalSignType.SYSTOLIC_BP,  # Systolic BP
+    "8462-4": VitalSignType.DIASTOLIC_BP,  # Diastolic BP
+    "8310-5": VitalSignType.TEMPERATURE_CELSIUS,  # Body temperature
+    "67775-7": VitalSignType.CONSCIOUSNESS,  # Level of responsiveness
+    "76270-8": VitalSignType.CONSCIOUSNESS,  # AVPU score
+    "57834-7": VitalSignType.SUPPLEMENTAL_O2,  # Oxygen therapy
+    "3151-8": VitalSignType.SUPPLEMENTAL_O2,  # Inhaled O2 flow rate
 }
 
 # Vendor-specific proprietary OBX-3 identifiers → VitalSignType.
@@ -66,7 +65,7 @@ _VENDOR_TO_TYPE: Final[dict[str, VitalSignType]] = {
     "HR": VitalSignType.HEART_RATE,
     "PULSE": VitalSignType.HEART_RATE,
     "HEART RATE": VitalSignType.HEART_RATE,
-    "PR": VitalSignType.HEART_RATE,              # Pulse Rate (GE)
+    "PR": VitalSignType.HEART_RATE,  # Pulse Rate (GE)
     # SpO2
     "SPO2": VitalSignType.SPO2,
     "SO2": VitalSignType.SPO2,
@@ -97,14 +96,14 @@ _VENDOR_TO_TYPE: Final[dict[str, VitalSignType]] = {
     "TEMP": VitalSignType.TEMPERATURE_CELSIUS,
     "T1": VitalSignType.TEMPERATURE_CELSIUS,
     "T2": VitalSignType.TEMPERATURE_CELSIUS,
-    "TEMPBLA": VitalSignType.TEMPERATURE_CELSIUS, # Bladder temp (Philips)
+    "TEMPBLA": VitalSignType.TEMPERATURE_CELSIUS,  # Bladder temp (Philips)
     "TEMPCORE": VitalSignType.TEMPERATURE_CELSIUS,
     # Consciousness (AVPU)
     "AVPU": VitalSignType.CONSCIOUSNESS,
     "LOC": VitalSignType.CONSCIOUSNESS,
     "CONS": VitalSignType.CONSCIOUSNESS,
     # Supplemental O2
-    "FIO2": VitalSignType.SUPPLEMENTAL_O2,        # FiO2 > 0.21 = on O2
+    "FIO2": VitalSignType.SUPPLEMENTAL_O2,  # FiO2 > 0.21 = on O2
     "O2FLOW": VitalSignType.SUPPLEMENTAL_O2,
     "O2DELIVERY": VitalSignType.SUPPLEMENTAL_O2,
     "AIROROXYGEN": VitalSignType.SUPPLEMENTAL_O2,
@@ -115,9 +114,9 @@ _VENDOR_TO_TYPE: Final[dict[str, VitalSignType]] = {
 _VENDOR_SUBSTRINGS: Final[list[tuple[str, MonitorVendor]]] = [
     ("PHILIPS", MonitorVendor.PHILIPS),
     ("INTELLIVUE", MonitorVendor.PHILIPS),
-    ("ISL", MonitorVendor.PHILIPS),       # Philips Information System Link
+    ("ISL", MonitorVendor.PHILIPS),  # Philips Information System Link
     ("CARESCAPE", MonitorVendor.GE),
-    ("GE ", MonitorVendor.GE),            # Trailing space avoids matching "GENERAL"
+    ("GE ", MonitorVendor.GE),  # Trailing space avoids matching "GENERAL"
     ("DASH", MonitorVendor.GE),
     ("DRAEGER", MonitorVendor.DRAEGER),
     ("DRAGER", MonitorVendor.DRAEGER),
@@ -328,7 +327,9 @@ class HL7v2Adapter:
                     return pid_3.split("^")[0].strip() or "UNKNOWN"
                 break
 
-        warnings.append("[PID-MISSING] PID-3 Patient Identifier absent — using 'UNKNOWN'.")
+        warnings.append(
+            "[PID-MISSING] PID-3 Patient Identifier absent — using 'UNKNOWN'."
+        )
         return "UNKNOWN"
 
     def _extract_message_timestamp(self, msg: object) -> datetime:
@@ -393,8 +394,7 @@ class HL7v2Adapter:
         raw_value = _safe_field(obx, "obx_5").strip()
         if not raw_value:
             warnings.append(
-                f"[OBX-SKIP] OBX-5 is empty for {vital_type.name}. "
-                "Segment skipped."
+                f"[OBX-SKIP] OBX-5 is empty for {vital_type.name}. " "Segment skipped."
             )
             return None
 
@@ -406,9 +406,7 @@ class HL7v2Adapter:
 
         # OBX-14: Date/Time of Observation (use message timestamp as fallback)
         obs_ts_str = _safe_field(obx, "obx_14")
-        obs_timestamp = (
-            _parse_hl7_datetime(obs_ts_str) if obs_ts_str else msg_timestamp
-        )
+        obs_timestamp = _parse_hl7_datetime(obs_ts_str) if obs_ts_str else msg_timestamp
 
         # Parse value based on VitalSignType
         if vital_type is VitalSignType.CONSCIOUSNESS:
@@ -417,9 +415,7 @@ class HL7v2Adapter:
             )
 
         if vital_type is VitalSignType.SUPPLEMENTAL_O2:
-            return self._build_o2_sample(
-                raw_value, obs_timestamp, device_id, warnings
-            )
+            return self._build_o2_sample(raw_value, obs_timestamp, device_id, warnings)
 
         # All other types: numeric value
         numeric = _parse_numeric(raw_value)
@@ -527,7 +523,7 @@ class HL7v2Adapter:
             return None
         return VitalSignSample(
             vital_sign_type=VitalSignType.CONSCIOUSNESS,
-            value=0.0,        # Numeric value unused for consciousness — avpu_level is authoritative
+            value=0.0,  # Numeric value unused for consciousness — avpu_level is authoritative
             unit=VitalSignUnit.AVPU_SCALE,
             timestamp=timestamp,
             avpu_level=avpu,

@@ -11,10 +11,13 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
-
-from domain.entities.news2_score import NEWS2RiskLevel
 from domain.entities.patient_context import PatientContext, SpO2Scale
-from domain.entities.vital_sign import AVPULevel, VitalSignSample, VitalSignType, VitalSignUnit
+from domain.entities.vital_sign import (
+    AVPULevel,
+    VitalSignSample,
+    VitalSignType,
+    VitalSignUnit,
+)
 from domain.services.news2_calculator import NEWS2Calculator, NEWS2InsufficientDataError
 from domain.services.signal_processor import ProcessedVitalSign, VitalSignProcessor
 
@@ -60,7 +63,9 @@ def _full_vitals(
         _make_sample(VitalSignType.SYSTOLIC_BP, sbp, VitalSignUnit.MMHG),
         _make_sample(VitalSignType.HEART_RATE, hr, VitalSignUnit.BPM),
         _make_sample(VitalSignType.TEMPERATURE_CELSIUS, temp, VitalSignUnit.CELSIUS),
-        _make_sample(VitalSignType.SUPPLEMENTAL_O2, 1.0 if on_o2 else 0.0, VitalSignUnit.BOOLEAN),
+        _make_sample(
+            VitalSignType.SUPPLEMENTAL_O2, 1.0 if on_o2 else 0.0, VitalSignUnit.BOOLEAN
+        ),
         _make_sample(VitalSignType.CONSCIOUSNESS, 0.0, VitalSignUnit.AVPU_SCALE, avpu),
     ]
     return [_processed(s) for s in samples]
@@ -75,17 +80,20 @@ class TestRespiratoryRateScoring:
     IEC 62304 REQ-NEWS2-RR: Verify all 5 score bands.
     """
 
-    @pytest.mark.parametrize(("rr", "expected"), [
-        (8.0, 3),   # RCP: ≤8 = 3
-        (9.0, 1),   # RCP: 9–11 = 1
-        (11.0, 1),
-        (12.0, 0),  # RCP: 12–20 = 0
-        (20.0, 0),
-        (21.0, 2),  # RCP: 21–24 = 2
-        (24.0, 2),
-        (25.0, 3),  # RCP: ≥25 = 3
-        (40.0, 3),
-    ])
+    @pytest.mark.parametrize(
+        ("rr", "expected"),
+        [
+            (8.0, 3),  # RCP: ≤8 = 3
+            (9.0, 1),  # RCP: 9–11 = 1
+            (11.0, 1),
+            (12.0, 0),  # RCP: 12–20 = 0
+            (20.0, 0),
+            (21.0, 2),  # RCP: 21–24 = 2
+            (24.0, 2),
+            (25.0, 3),  # RCP: ≥25 = 3
+            (40.0, 3),
+        ],
+    )
     def test_rr_boundary(self, rr: float, expected: int) -> None:
         vitals = _full_vitals(rr=rr)
         score = _CALC.calculate(vitals, _CTX_S1)
@@ -104,21 +112,24 @@ class TestSpO2Scale1Scoring:
     ISO 14971 HAZARD-SPO2-001: Controls misclassification of SpO2 range.
     """
 
-    @pytest.mark.parametrize(("spo2", "expected"), [
-        (91.0, 3),   # ≤91 = 3
-        (92.0, 2),   # 92–93 = 2
-        (93.0, 2),
-        (94.0, 1),   # 94–95 = 1
-        (95.0, 1),
-        (96.0, 0),   # ≥96 = 0
-        (99.0, 0),
-    ])
+    @pytest.mark.parametrize(
+        ("spo2", "expected"),
+        [
+            (91.0, 3),  # ≤91 = 3
+            (92.0, 2),  # 92–93 = 2
+            (93.0, 2),
+            (94.0, 1),  # 94–95 = 1
+            (95.0, 1),
+            (96.0, 0),  # ≥96 = 0
+            (99.0, 0),
+        ],
+    )
     def test_spo2_scale1_boundary(self, spo2: float, expected: int) -> None:
         vitals = _full_vitals(spo2=spo2, on_o2=False)
         score = _CALC.calculate(vitals, _CTX_S1)
-        assert score.spo2_score == expected, (
-            f"SpO2={spo2}% Scale1: expected {expected}, got {score.spo2_score}."
-        )
+        assert (
+            score.spo2_score == expected
+        ), f"SpO2={spo2}% Scale1: expected {expected}, got {score.spo2_score}."
 
 
 # ── SpO2 Scale 2 Boundaries ───────────────────────────────────────────────────
@@ -130,22 +141,25 @@ class TestSpO2Scale2Scoring:
     ISO 14971 HAZARD-SPO2-001: Scale 2 scoring differs significantly from Scale 1.
     """
 
-    @pytest.mark.parametrize(("spo2", "on_o2", "expected"), [
-        (83.0, False, 3),   # ≤83 = 3
-        (84.0, False, 2),   # 84–85 = 2
-        (85.0, False, 2),
-        (86.0, False, 1),   # 86–87 = 1
-        (87.0, False, 1),
-        (88.0, False, 0),   # 88–92 on air = 0 (COPD target range)
-        (92.0, False, 0),
-        (93.0, True,  1),   # 93–94 on O2 = 1
-        (94.0, True,  1),
-        (95.0, True,  2),   # 95–96 on O2 = 2
-        (96.0, True,  2),
-        (97.0, True,  3),   # ≥97 on O2 = 3
-        (99.0, True,  3),
-        (93.0, False, 0),   # ≥93 on air for COPD = normal (no penalty)
-    ])
+    @pytest.mark.parametrize(
+        ("spo2", "on_o2", "expected"),
+        [
+            (83.0, False, 3),  # ≤83 = 3
+            (84.0, False, 2),  # 84–85 = 2
+            (85.0, False, 2),
+            (86.0, False, 1),  # 86–87 = 1
+            (87.0, False, 1),
+            (88.0, False, 0),  # 88–92 on air = 0 (COPD target range)
+            (92.0, False, 0),
+            (93.0, True, 1),  # 93–94 on O2 = 1
+            (94.0, True, 1),
+            (95.0, True, 2),  # 95–96 on O2 = 2
+            (96.0, True, 2),
+            (97.0, True, 3),  # ≥97 on O2 = 3
+            (99.0, True, 3),
+            (93.0, False, 0),  # ≥93 on air for COPD = normal (no penalty)
+        ],
+    )
     def test_spo2_scale2_boundary(
         self, spo2: float, on_o2: bool, expected: int
     ) -> None:
@@ -174,23 +188,26 @@ class TestSupplementalO2Scoring:
 
 
 class TestSystolicBPScoring:
-    @pytest.mark.parametrize(("sbp", "expected"), [
-        (90.0, 3),    # ≤90 = 3
-        (91.0, 2),    # 91–100 = 2
-        (100.0, 2),
-        (101.0, 1),   # 101–110 = 1
-        (110.0, 1),
-        (111.0, 0),   # 111–219 = 0
-        (219.0, 0),
-        (220.0, 3),   # ≥220 = 3
-        (280.0, 3),
-    ])
+    @pytest.mark.parametrize(
+        ("sbp", "expected"),
+        [
+            (90.0, 3),  # ≤90 = 3
+            (91.0, 2),  # 91–100 = 2
+            (100.0, 2),
+            (101.0, 1),  # 101–110 = 1
+            (110.0, 1),
+            (111.0, 0),  # 111–219 = 0
+            (219.0, 0),
+            (220.0, 3),  # ≥220 = 3
+            (280.0, 3),
+        ],
+    )
     def test_sbp_boundary(self, sbp: float, expected: int) -> None:
         vitals = _full_vitals(sbp=sbp)
         score = _CALC.calculate(vitals, _CTX_S1)
-        assert score.systolic_bp_score == expected, (
-            f"SBP={sbp}: expected {expected}, got {score.systolic_bp_score}."
-        )
+        assert (
+            score.systolic_bp_score == expected
+        ), f"SBP={sbp}: expected {expected}, got {score.systolic_bp_score}."
 
 
 # ── Heart Rate Boundaries ─────────────────────────────────────────────────────
@@ -202,25 +219,28 @@ class TestHeartRateScoring:
     Must be explicitly verified to prevent regression.
     """
 
-    @pytest.mark.parametrize(("hr", "expected"), [
-        (40.0, 3),    # ≤40 = 3
-        (41.0, 1),    # 41–50 = 1 (non-monotonic!)
-        (50.0, 1),
-        (51.0, 0),    # 51–90 = 0
-        (90.0, 0),
-        (91.0, 1),    # 91–110 = 1
-        (110.0, 1),
-        (111.0, 2),   # 111–130 = 2
-        (130.0, 2),
-        (131.0, 3),   # ≥131 = 3
-        (200.0, 3),
-    ])
+    @pytest.mark.parametrize(
+        ("hr", "expected"),
+        [
+            (40.0, 3),  # ≤40 = 3
+            (41.0, 1),  # 41–50 = 1 (non-monotonic!)
+            (50.0, 1),
+            (51.0, 0),  # 51–90 = 0
+            (90.0, 0),
+            (91.0, 1),  # 91–110 = 1
+            (110.0, 1),
+            (111.0, 2),  # 111–130 = 2
+            (130.0, 2),
+            (131.0, 3),  # ≥131 = 3
+            (200.0, 3),
+        ],
+    )
     def test_hr_boundary(self, hr: float, expected: int) -> None:
         vitals = _full_vitals(hr=hr)
         score = _CALC.calculate(vitals, _CTX_S1)
-        assert score.heart_rate_score == expected, (
-            f"HR={hr}: expected {expected}, got {score.heart_rate_score}."
-        )
+        assert (
+            score.heart_rate_score == expected
+        ), f"HR={hr}: expected {expected}, got {score.heart_rate_score}."
 
 
 # ── Consciousness (AVPU) Scoring ──────────────────────────────────────────────
@@ -235,12 +255,15 @@ class TestConsciousnessScoring:
         vitals = _full_vitals(avpu=AVPULevel.ALERT)
         assert _CALC.calculate(vitals, _CTX_S1).consciousness_score == 0
 
-    @pytest.mark.parametrize("avpu", [
-        AVPULevel.VOICE,
-        AVPULevel.PAIN,
-        AVPULevel.UNRESPONSIVE,
-        AVPULevel.NEW_CONFUSION,
-    ])
+    @pytest.mark.parametrize(
+        "avpu",
+        [
+            AVPULevel.VOICE,
+            AVPULevel.PAIN,
+            AVPULevel.UNRESPONSIVE,
+            AVPULevel.NEW_CONFUSION,
+        ],
+    )
     def test_non_alert_scores_3(self, avpu: AVPULevel) -> None:
         vitals = _full_vitals(avpu=avpu)
         score = _CALC.calculate(vitals, _CTX_S1).consciousness_score
@@ -251,23 +274,26 @@ class TestConsciousnessScoring:
 
 
 class TestTemperatureScoring:
-    @pytest.mark.parametrize(("temp", "expected"), [
-        (35.0, 3),    # ≤35.0 = 3
-        (35.1, 1),    # 35.1–36.0 = 1
-        (36.0, 1),
-        (36.1, 0),    # 36.1–38.0 = 0
-        (38.0, 0),
-        (38.1, 1),    # 38.1–39.0 = 1
-        (39.0, 1),
-        (39.1, 2),    # ≥39.1 = 2
-        (41.0, 2),
-    ])
+    @pytest.mark.parametrize(
+        ("temp", "expected"),
+        [
+            (35.0, 3),  # ≤35.0 = 3
+            (35.1, 1),  # 35.1–36.0 = 1
+            (36.0, 1),
+            (36.1, 0),  # 36.1–38.0 = 0
+            (38.0, 0),
+            (38.1, 1),  # 38.1–39.0 = 1
+            (39.0, 1),
+            (39.1, 2),  # ≥39.1 = 2
+            (41.0, 2),
+        ],
+    )
     def test_temperature_boundary(self, temp: float, expected: int) -> None:
         vitals = _full_vitals(temp=temp)
         score = _CALC.calculate(vitals, _CTX_S1)
-        assert score.temperature_score == expected, (
-            f"Temp={temp}°C: expected {expected}, got {score.temperature_score}."
-        )
+        assert (
+            score.temperature_score == expected
+        ), f"Temp={temp}°C: expected {expected}, got {score.temperature_score}."
 
 
 # ── Insufficient Data Handling ────────────────────────────────────────────────
@@ -275,14 +301,20 @@ class TestTemperatureScoring:
 
 class TestInsufficientDataHandling:
     def test_missing_rr_raises(self) -> None:
-        vitals = [v for v in _full_vitals() if
-                  v.original.vital_sign_type is not VitalSignType.RESPIRATORY_RATE]
+        vitals = [
+            v
+            for v in _full_vitals()
+            if v.original.vital_sign_type is not VitalSignType.RESPIRATORY_RATE
+        ]
         with pytest.raises(NEWS2InsufficientDataError, match="RESPIRATORY_RATE"):
             _CALC.calculate(vitals, _CTX_S1)
 
     def test_missing_spo2_raises(self) -> None:
-        vitals = [v for v in _full_vitals() if
-                  v.original.vital_sign_type is not VitalSignType.SPO2]
+        vitals = [
+            v
+            for v in _full_vitals()
+            if v.original.vital_sign_type is not VitalSignType.SPO2
+        ]
         with pytest.raises(NEWS2InsufficientDataError, match="SPO2"):
             _CALC.calculate(vitals, _CTX_S1)
 

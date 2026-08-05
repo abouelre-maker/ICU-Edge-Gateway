@@ -48,8 +48,7 @@ class TestHealthEndpoint:
         response = await client.get("/health")
         ts: str = response.json()["timestamp"]
         assert ts.endswith("Z") or "+" in ts[10:] or "-" in ts[10:], (
-            f"timestamp '{ts}' must include timezone. "
-            "ISO 14971 HAZARD-TIME-001."
+            f"timestamp '{ts}' must include timezone. " "ISO 14971 HAZARD-TIME-001."
         )
 
     async def test_components_field_present(self, client: AsyncClient) -> None:

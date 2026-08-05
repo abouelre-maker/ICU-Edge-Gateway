@@ -23,8 +23,8 @@ _VERSION = "1.0.0"
 class ComponentHealth(BaseModel):
     """Health status of a single internal component."""
 
-    status: str                  # "healthy" | "degraded" | "unhealthy"
-    note: str | None = None      # Optional diagnostic message
+    status: str  # "healthy" | "degraded" | "unhealthy"
+    note: str | None = None  # Optional diagnostic message
 
 
 class HealthResponse(BaseModel):
@@ -35,11 +35,11 @@ class HealthResponse(BaseModel):
     clinical IT monitoring dashboards to detect degraded service.
     """
 
-    status: str                              # Aggregate: "healthy" | "degraded" | "unhealthy"
-    version: str                             # Software version (IEC 62304 traceability)
-    uptime_seconds: float                    # Seconds since application startup
-    timestamp: str                           # ISO 8601 UTC — time of this response
-    components: dict[str, ComponentHealth]   # Per-component status
+    status: str  # Aggregate: "healthy" | "degraded" | "unhealthy"
+    version: str  # Software version (IEC 62304 traceability)
+    uptime_seconds: float  # Seconds since application startup
+    timestamp: str  # ISO 8601 UTC — time of this response
+    components: dict[str, ComponentHealth]  # Per-component status
 
 
 @router.get(

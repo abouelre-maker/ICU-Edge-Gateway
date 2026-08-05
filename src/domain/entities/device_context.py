@@ -23,24 +23,24 @@ class MonitorVendor(str, Enum):
     non-standard OBX segments may be silently dropped.
     """
 
-    PHILIPS = "PHILIPS"          # IntelliVue series (MX/MP/MX800)
-    GE = "GE"                    # CARESCAPE B series
-    DRAEGER = "DRAEGER"          # Infinity series
-    MINDRAY = "MINDRAY"          # Beneview/ePM series
+    PHILIPS = "PHILIPS"  # IntelliVue series (MX/MP/MX800)
+    GE = "GE"  # CARESCAPE B series
+    DRAEGER = "DRAEGER"  # Infinity series
+    MINDRAY = "MINDRAY"  # Beneview/ePM series
     NIHON_KOHDEN = "NIHON_KOHDEN"
-    GENERIC = "GENERIC"          # Fallback — standard ORU^R01 only
+    GENERIC = "GENERIC"  # Fallback — standard ORU^R01 only
 
 
 class HL7Version(str, Enum):
     """HL7 v2.x versions observed in North American ICU environments."""
 
-    V2_3 = "2.3"    # Legacy — still common in older Philips/GE devices
+    V2_3 = "2.3"  # Legacy — still common in older Philips/GE devices
     V2_3_1 = "2.3.1"
     V2_4 = "2.4"
     V2_5 = "2.5"
     V2_5_1 = "2.5.1"  # Most common in US hospitals
     V2_6 = "2.6"
-    V2_8 = "2.8"      # Emerging in newer deployments
+    V2_8 = "2.8"  # Emerging in newer deployments
 
 
 @dataclass(frozen=True)
@@ -53,11 +53,11 @@ class DeviceContext:
     FHIR: Populates Device.manufacturer and Device.model in the FHIR Bundle.
     """
 
-    device_id: str                             # FHIR Device logical ID
+    device_id: str  # FHIR Device logical ID
     vendor: MonitorVendor
-    model: str                                 # e.g., "IntelliVue MX800"
+    model: str  # e.g., "IntelliVue MX800"
     hl7_version: HL7Version = HL7Version.V2_5_1
-    location: str | None = None                # e.g., "ICU-BED-07-A"
+    location: str | None = None  # e.g., "ICU-BED-07-A"
     firmware_version: str | None = None
 
     def __post_init__(self) -> None:
