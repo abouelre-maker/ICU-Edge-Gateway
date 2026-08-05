@@ -1,0 +1,47 @@
+# Version control
+.git
+.gitignore
+.gitattributes
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Development / testing artifacts
+tests/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+coverage.xml
+htmlcov/
+*.egg-info/
+
+# Dev-only configuration
+requirements-dev.txt
+pyproject.toml
+.env
+.env.*
+
+# Regulatory and documentation (not needed at runtime)
+regulatory/
+docs/
+*.md
+*.rst
+*.txt
+!requirements.txt
+
+# IDE and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# CI/CD (not needed in image)
+.github/
+
+# Build artifacts
+dist/
+build/
