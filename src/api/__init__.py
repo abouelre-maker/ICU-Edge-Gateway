@@ -1,0 +1,1 @@
+"""API package — ICU Edge-to-FHIR Gateway."""
