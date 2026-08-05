@@ -48,9 +48,7 @@ class PatientContext:
     patient_id: str
     spo2_scale: SpO2Scale = SpO2Scale.SCALE_1
     encounter_id: str | None = None
-    assigned_at: datetime = field(
-        default_factory=lambda: datetime.now(tz=timezone.utc)
-    )
+    assigned_at: datetime = field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
     def __post_init__(self) -> None:
         if not self.patient_id or not self.patient_id.strip():

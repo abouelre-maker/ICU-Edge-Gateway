@@ -21,6 +21,7 @@ from typing import Any, Final
 from domain.entities.device_context import DeviceContext
 from domain.entities.patient_context import PatientContext
 from domain.services.vitals_orchestrator import VitalsAnalysisResult
+
 from infrastructure.fhir.news2_builder import NEWS2ObservationBuilder
 from infrastructure.fhir.observation_builder import (
     ObservationBuilder,
@@ -160,9 +161,7 @@ class BundleAssembler:
 
         # Pipeline warnings as Bundle.note (audit trail)
         if result.pipeline_warnings:
-            bundle["note"] = [
-                {"text": warning} for warning in result.pipeline_warnings
-            ]
+            bundle["note"] = [{"text": warning} for warning in result.pipeline_warnings]
 
         return bundle
 

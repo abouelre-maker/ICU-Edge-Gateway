@@ -99,9 +99,9 @@ class TestIngestValidHL7:
         response = await client.post(
             "/api/v1/ingest", content=FULL_ORU, headers=_HL7_HEADERS
         )
-        assert "timestamp" in response.json(), (
-            "Bundle.timestamp is required. ISO 14971 HAZARD-FHIR-003."
-        )
+        assert (
+            "timestamp" in response.json()
+        ), "Bundle.timestamp is required. ISO 14971 HAZARD-FHIR-003."
 
     async def test_bundle_contains_vital_sign_observations(
         self, client: AsyncClient
@@ -111,22 +111,20 @@ class TestIngestValidHL7:
         )
         entries = response.json()["entry"]
         obs_entries = [
-            e for e in entries
-            if e["resource"]["resourceType"] == "Observation"
+            e for e in entries if e["resource"]["resourceType"] == "Observation"
         ]
-        assert len(obs_entries) >= 5, (
-            "Full ORU^R01 with 6 OBX segments must produce ≥5 Observations."
-        )
+        assert (
+            len(obs_entries) >= 5
+        ), "Full ORU^R01 with 6 OBX segments must produce ≥5 Observations."
 
-    async def test_bundle_contains_news2_observation(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_bundle_contains_news2_observation(self, client: AsyncClient) -> None:
         response = await client.post(
             "/api/v1/ingest", content=FULL_ORU, headers=_HL7_HEADERS
         )
         entries = response.json()["entry"]
         news2_entries = [
-            e for e in entries
+            e
+            for e in entries
             if e["resource"]["resourceType"] == "Observation"
             and any(
                 c.get("code") == "1239842005"
@@ -144,8 +142,7 @@ class TestIngestValidHL7:
         )
         entries = response.json()["entry"]
         obs_entries = [
-            e for e in entries
-            if e["resource"]["resourceType"] == "Observation"
+            e for e in entries if e["resource"]["resourceType"] == "Observation"
         ]
         # All observations must reference PT-API-001 (from PID-3)
         for entry in obs_entries:
@@ -155,9 +152,7 @@ class TestIngestValidHL7:
                 "IEC 62304 REQ-HL7-002."
             )
 
-    async def test_pipeline_duration_header_present(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_pipeline_duration_header_present(self, client: AsyncClient) -> None:
         response = await client.post(
             "/api/v1/ingest", content=FULL_ORU, headers=_HL7_HEADERS
         )
@@ -186,9 +181,7 @@ class TestIngestValidHL7:
 class TestIngestVendorDialects:
     """POST /api/v1/ingest — vendor-specific HL7 dialect handling."""
 
-    async def test_philips_proprietary_codes_parse(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_philips_proprietary_codes_parse(self, client: AsyncClient) -> None:
         response = await client.post(
             "/api/v1/ingest", content=PHILIPS_ORU, headers=_HL7_HEADERS
         )
@@ -196,8 +189,7 @@ class TestIngestVendorDialects:
         bundle = response.json()
         entries = bundle["entry"]
         obs_count = sum(
-            1 for e in entries
-            if e["resource"]["resourceType"] == "Observation"
+            1 for e in entries if e["resource"]["resourceType"] == "Observation"
         )
         assert obs_count >= 4, "Philips dialect must parse ≥4 OBX segments."
 
@@ -212,8 +204,7 @@ class TestIngestVendorDialects:
         assert response.status_code == 200
         entries = response.json()["entry"]
         device_entries = [
-            e for e in entries
-            if e["resource"]["resourceType"] == "Device"
+            e for e in entries if e["resource"]["resourceType"] == "Device"
         ]
         assert len(device_entries) == 1
         assert device_entries[0]["resource"]["manufacturer"] == "DRAEGER"
@@ -229,8 +220,7 @@ class TestIngestVendorDialects:
         assert response.status_code == 200
         entries = response.json()["entry"]
         obs_entries = [
-            e for e in entries
-            if e["resource"]["resourceType"] == "Observation"
+            e for e in entries if e["resource"]["resourceType"] == "Observation"
         ]
         for entry in obs_entries:
             if "encounter" in entry["resource"]:
@@ -271,9 +261,7 @@ class TestIngestClinicalScenarios:
         assert response.status_code == 200
         assert response.json()["resourceType"] == "Bundle"
 
-    async def test_partial_vitals_no_news2_no_error(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_partial_vitals_no_news2_no_error(self, client: AsyncClient) -> None:
         """
         Incomplete vital signs set must return 200 (not 500).
         Bundle should not contain a NEWS2 Observation when data is insufficient.
@@ -285,7 +273,8 @@ class TestIngestClinicalScenarios:
         assert response.status_code == 200
         entries = response.json()["entry"]
         news2_entries = [
-            e for e in entries
+            e
+            for e in entries
             if e["resource"]["resourceType"] == "Observation"
             and any(
                 c.get("code") == "1239842005"
@@ -312,9 +301,7 @@ class TestIngestErrorHandling:
         )
         assert response.status_code == 422
 
-    async def test_whitespace_only_body_returns_422(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_whitespace_only_body_returns_422(self, client: AsyncClient) -> None:
         response = await client.post(
             "/api/v1/ingest",
             content=b"   \n\t  ",
@@ -340,9 +327,7 @@ class TestIngestErrorHandling:
         )
         assert response.status_code == 422
 
-    async def test_error_response_has_detail_field(
-        self, client: AsyncClient
-    ) -> None:
+    async def test_error_response_has_detail_field(self, client: AsyncClient) -> None:
         response = await client.post(
             "/api/v1/ingest",
             content=b"GARBAGE DATA",

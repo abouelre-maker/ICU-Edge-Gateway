@@ -17,12 +17,15 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
-
-from domain.entities.news2_score import NEWS2Score
-from domain.entities.vital_sign import AVPULevel, VitalSignSample, VitalSignType, VitalSignUnit
+from domain.entities.patient_context import PatientContext, SpO2Scale
+from domain.entities.vital_sign import (
+    AVPULevel,
+    VitalSignSample,
+    VitalSignType,
+    VitalSignUnit,
+)
 from domain.services.signal_processor import VitalSignProcessor
 from domain.services.vitals_orchestrator import VitalsOrchestrator
-from domain.entities.patient_context import PatientContext, SpO2Scale
 from infrastructure.fhir.bundle_assembler import BundleAssembler
 from infrastructure.fhir.news2_builder import NEWS2ObservationBuilder
 from infrastructure.fhir.observation_builder import ObservationBuilder
@@ -35,7 +38,9 @@ _ASSEMBLER = BundleAssembler()
 _CTX = PatientContext(patient_id="PT-CONF-001", spo2_scale=SpO2Scale.SCALE_1)
 
 
-def _obs(vital_type: VitalSignType, value: float, avpu: AVPULevel | None = None) -> dict:  # type: ignore[type-arg]
+def _obs(
+    vital_type: VitalSignType, value: float, avpu: AVPULevel | None = None
+) -> dict:  # type: ignore[type-arg]
     sample = VitalSignSample(
         vital_sign_type=vital_type,
         value=value,
@@ -50,15 +55,18 @@ def _obs(vital_type: VitalSignType, value: float, avpu: AVPULevel | None = None)
 # ── FHIR Observation Required Fields ──────────────────────────────────────────
 
 
-@pytest.mark.parametrize("vital_type,value,avpu", [
-    (VitalSignType.HEART_RATE, 72.0, None),
-    (VitalSignType.SPO2, 98.0, None),
-    (VitalSignType.RESPIRATORY_RATE, 16.0, None),
-    (VitalSignType.SYSTOLIC_BP, 120.0, None),
-    (VitalSignType.TEMPERATURE_CELSIUS, 37.0, None),
-    (VitalSignType.CONSCIOUSNESS, 0.0, AVPULevel.ALERT),
-    (VitalSignType.SUPPLEMENTAL_O2, 0.0, None),
-])
+@pytest.mark.parametrize(
+    "vital_type,value,avpu",
+    [
+        (VitalSignType.HEART_RATE, 72.0, None),
+        (VitalSignType.SPO2, 98.0, None),
+        (VitalSignType.RESPIRATORY_RATE, 16.0, None),
+        (VitalSignType.SYSTOLIC_BP, 120.0, None),
+        (VitalSignType.TEMPERATURE_CELSIUS, 37.0, None),
+        (VitalSignType.CONSCIOUSNESS, 0.0, AVPULevel.ALERT),
+        (VitalSignType.SUPPLEMENTAL_O2, 0.0, None),
+    ],
+)
 class TestObservationRequiredFields:
     """
     FHIR R4 Observation: Required fields must be present for all vital sign types.
@@ -110,9 +118,7 @@ class TestObservationRequiredFields:
         obs = _obs(vital_type, value, avpu)
         assert "category" in obs
         category_codes = [
-            c["code"]
-            for cat in obs["category"]
-            for c in cat.get("coding", [])
+            c["code"] for cat in obs["category"] for c in cat.get("coding", [])
         ]
         assert "vital-signs" in category_codes or "survey" in category_codes
 
@@ -121,8 +127,7 @@ class TestObservationRequiredFields:
     ) -> None:
         obs = _obs(vital_type, value, avpu)
         loinc_codings = [
-            c for c in obs["code"]["coding"]
-            if c.get("system") == "http://loinc.org"
+            c for c in obs["code"]["coding"] if c.get("system") == "http://loinc.org"
         ]
         assert len(loinc_codings) >= 1, (
             f"All Observations must have a LOINC code. "
@@ -190,13 +195,22 @@ class TestBundleConformance:
         orch = VitalsOrchestrator()
         samples = [
             VitalSignSample(VitalSignType.HEART_RATE, 72.0, VitalSignUnit.BPM, _TS),
-            VitalSignSample(VitalSignType.RESPIRATORY_RATE, 16.0, VitalSignUnit.BREATHS_PER_MIN, _TS),
+            VitalSignSample(
+                VitalSignType.RESPIRATORY_RATE, 16.0, VitalSignUnit.BREATHS_PER_MIN, _TS
+            ),
             VitalSignSample(VitalSignType.SPO2, 98.0, VitalSignUnit.PERCENT, _TS),
             VitalSignSample(VitalSignType.SYSTOLIC_BP, 120.0, VitalSignUnit.MMHG, _TS),
-            VitalSignSample(VitalSignType.TEMPERATURE_CELSIUS, 37.0, VitalSignUnit.CELSIUS, _TS),
-            VitalSignSample(VitalSignType.SUPPLEMENTAL_O2, 0.0, VitalSignUnit.BOOLEAN, _TS),
             VitalSignSample(
-                VitalSignType.CONSCIOUSNESS, 0.0, VitalSignUnit.AVPU_SCALE, _TS,
+                VitalSignType.TEMPERATURE_CELSIUS, 37.0, VitalSignUnit.CELSIUS, _TS
+            ),
+            VitalSignSample(
+                VitalSignType.SUPPLEMENTAL_O2, 0.0, VitalSignUnit.BOOLEAN, _TS
+            ),
+            VitalSignSample(
+                VitalSignType.CONSCIOUSNESS,
+                0.0,
+                VitalSignUnit.AVPU_SCALE,
+                _TS,
                 avpu_level=AVPULevel.ALERT,
             ),
         ]
@@ -232,8 +246,7 @@ class TestBundleConformance:
         bundle = self._build_bundle()
         full_urls = [e["fullUrl"] for e in bundle["entry"]]
         assert len(full_urls) == len(set(full_urls)), (
-            "All Bundle entry fullUrls must be unique. "
-            "FHIR R4 §3.3.1."
+            "All Bundle entry fullUrls must be unique. " "FHIR R4 §3.3.1."
         )
 
     def test_bundle_entry_ids_are_unique(self) -> None:

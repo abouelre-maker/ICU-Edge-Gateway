@@ -11,13 +11,16 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
-
 from domain.entities.device_context import DeviceContext, HL7Version, MonitorVendor
 from domain.entities.news2_score import NEWS2Score
 from domain.entities.patient_context import PatientContext, SpO2Scale
-from domain.entities.vital_sign import AVPULevel, VitalSignSample, VitalSignType, VitalSignUnit
+from domain.entities.vital_sign import (
+    AVPULevel,
+    VitalSignSample,
+    VitalSignType,
+    VitalSignUnit,
+)
 from domain.services.signal_processor import VitalSignProcessor
-from domain.services.vitals_orchestrator import VitalsOrchestrator
 from infrastructure.fhir.bundle_assembler import BundleAssembler
 from infrastructure.fhir.news2_builder import NEWS2ObservationBuilder
 from infrastructure.fhir.observation_builder import ObservationBuilder
@@ -38,7 +41,9 @@ _DEVICE_CTX = DeviceContext(
 )
 
 
-def _make_processed(vital_type: VitalSignType, value: float, avpu: AVPULevel | None = None):  # type: ignore[return]
+def _make_processed(
+    vital_type: VitalSignType, value: float, avpu: AVPULevel | None = None
+):  # type: ignore[return]
     sample = VitalSignSample(
         vital_sign_type=vital_type,
         value=value,
@@ -161,7 +166,9 @@ class TestObservationBuilderConsciousness:
 
     def test_new_confusion_maps_to_correct_snomed(self) -> None:
         obs = _OBS_BUILDER.build(
-            _make_processed(VitalSignType.CONSCIOUSNESS, 0.0, avpu=AVPULevel.NEW_CONFUSION),
+            _make_processed(
+                VitalSignType.CONSCIOUSNESS, 0.0, avpu=AVPULevel.NEW_CONFUSION
+            ),
             patient_id="PT-001",
         )
         vcc = obs["valueCodeableConcept"]
@@ -229,8 +236,7 @@ class TestNEWS2ObservationBuilder:
         score = _make_news2_score()
         obs = _NEWS2_BUILDER.build(score, patient_id="PT-001")
         advisory_exts = [
-            e for e in obs["extension"]
-            if "cds-advisory-only" in e.get("url", "")
+            e for e in obs["extension"] if "cds-advisory-only" in e.get("url", "")
         ]
         assert len(advisory_exts) == 1
         assert advisory_exts[0]["valueBoolean"] is True
@@ -239,8 +245,7 @@ class TestNEWS2ObservationBuilder:
         score = NEWS2Score.zero()
         obs = _NEWS2_BUILDER.build(score, patient_id="PT-001")
         risk_exts = [
-            e for e in obs["extension"]
-            if "news2-risk-level" in e.get("url", "")
+            e for e in obs["extension"] if "news2-risk-level" in e.get("url", "")
         ]
         assert len(risk_exts) == 1
         assert risk_exts[0]["valueCode"] == "NORMAL"
@@ -254,11 +259,7 @@ class TestNEWS2ObservationBuilder:
     def test_category_is_survey(self) -> None:
         score = _make_news2_score()
         obs = _NEWS2_BUILDER.build(score, patient_id="PT-001")
-        codes = [
-            c["code"]
-            for cat in obs["category"]
-            for c in cat["coding"]
-        ]
+        codes = [c["code"] for cat in obs["category"] for c in cat["coding"]]
         assert "survey" in codes
 
 
@@ -268,17 +269,27 @@ class TestNEWS2ObservationBuilder:
 class TestBundleAssembler:
     def _make_full_result(self):  # type: ignore[return]
         from domain.services.vitals_orchestrator import VitalsOrchestrator
+
         orch = VitalsOrchestrator()
         samples = [
             VitalSignSample(VitalSignType.HEART_RATE, 72.0, VitalSignUnit.BPM, _TS),
-            VitalSignSample(VitalSignType.RESPIRATORY_RATE, 16.0, VitalSignUnit.BREATHS_PER_MIN, _TS),
+            VitalSignSample(
+                VitalSignType.RESPIRATORY_RATE, 16.0, VitalSignUnit.BREATHS_PER_MIN, _TS
+            ),
             VitalSignSample(VitalSignType.SPO2, 98.0, VitalSignUnit.PERCENT, _TS),
             VitalSignSample(VitalSignType.SYSTOLIC_BP, 120.0, VitalSignUnit.MMHG, _TS),
-            VitalSignSample(VitalSignType.TEMPERATURE_CELSIUS, 37.0, VitalSignUnit.CELSIUS, _TS),
-            VitalSignSample(VitalSignType.SUPPLEMENTAL_O2, 0.0, VitalSignUnit.BOOLEAN, _TS),
             VitalSignSample(
-                VitalSignType.CONSCIOUSNESS, 0.0, VitalSignUnit.AVPU_SCALE, _TS,
-                avpu_level=AVPULevel.ALERT
+                VitalSignType.TEMPERATURE_CELSIUS, 37.0, VitalSignUnit.CELSIUS, _TS
+            ),
+            VitalSignSample(
+                VitalSignType.SUPPLEMENTAL_O2, 0.0, VitalSignUnit.BOOLEAN, _TS
+            ),
+            VitalSignSample(
+                VitalSignType.CONSCIOUSNESS,
+                0.0,
+                VitalSignUnit.AVPU_SCALE,
+                _TS,
+                avpu_level=AVPULevel.ALERT,
             ),
         ]
         return orch.analyse(samples, _PATIENT_CTX)
@@ -296,16 +307,15 @@ class TestBundleAssembler:
     def test_bundle_has_timestamp(self) -> None:
         result = self._make_full_result()
         bundle = _BUNDLE_ASSEMBLER.assemble(result, _PATIENT_CTX, _DEVICE_CTX)
-        assert "timestamp" in bundle, (
-            "Bundle.timestamp is required. ISO 14971 HAZARD-FHIR-003."
-        )
+        assert (
+            "timestamp" in bundle
+        ), "Bundle.timestamp is required. ISO 14971 HAZARD-FHIR-003."
 
     def test_bundle_contains_device_entry(self) -> None:
         result = self._make_full_result()
         bundle = _BUNDLE_ASSEMBLER.assemble(result, _PATIENT_CTX, _DEVICE_CTX)
         device_entries = [
-            e for e in bundle["entry"]
-            if e["resource"]["resourceType"] == "Device"
+            e for e in bundle["entry"] if e["resource"]["resourceType"] == "Device"
         ]
         assert len(device_entries) == 1
         assert device_entries[0]["resource"]["manufacturer"] == "PHILIPS"
@@ -314,7 +324,8 @@ class TestBundleAssembler:
         result = self._make_full_result()
         bundle = _BUNDLE_ASSEMBLER.assemble(result, _PATIENT_CTX, _DEVICE_CTX)
         news2_entries = [
-            e for e in bundle["entry"]
+            e
+            for e in bundle["entry"]
             if e["resource"]["resourceType"] == "Observation"
             and any(
                 c.get("code") == "1239842005"
@@ -333,7 +344,6 @@ class TestBundleAssembler:
         result = self._make_full_result()
         bundle = _BUNDLE_ASSEMBLER.assemble(result, _PATIENT_CTX, device_context=None)
         device_entries = [
-            e for e in bundle["entry"]
-            if e["resource"]["resourceType"] == "Device"
+            e for e in bundle["entry"] if e["resource"]["resourceType"] == "Device"
         ]
         assert len(device_entries) == 0

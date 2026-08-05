@@ -14,13 +14,12 @@ from contextlib import asynccontextmanager
 
 import structlog
 import uvicorn
-from fastapi import FastAPI, Request, status
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-
 from api.v1.health import router as health_router
 from api.v1.ingest import router as ingest_router
 from api.v1.vitals import router as vitals_router
+from fastapi import FastAPI, Request, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -134,9 +133,9 @@ def create_app() -> FastAPI:
         )
 
     # ── Routers ────────────────────────────────────────────────────────────────
-    app.include_router(health_router)                     # GET  /health
-    app.include_router(ingest_router, prefix="/api/v1")   # POST /api/v1/ingest
-    app.include_router(vitals_router, prefix="/api/v1")   # POST /api/v1/vitals
+    app.include_router(health_router)  # GET  /health
+    app.include_router(ingest_router, prefix="/api/v1")  # POST /api/v1/ingest
+    app.include_router(vitals_router, prefix="/api/v1")  # POST /api/v1/vitals
 
     return app
 

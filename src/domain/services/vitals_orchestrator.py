@@ -146,7 +146,10 @@ class VitalsOrchestrator:
             warnings.append(f"[NEWS2-INCOMPLETE] {e}")
             log.warning("vitals_orchestrator.news2.insufficient_data", error=str(e))
             # Identify which required parameters are absent or invalid
-            from domain.services.news2_calculator import _REQUIRED_VITAL_TYPES  # noqa: PLC0415
+            from domain.services.news2_calculator import (
+                _REQUIRED_VITAL_TYPES,  # noqa: PLC0415
+            )
+
             available = frozenset(
                 pv.original.vital_sign_type
                 for pv in processed
