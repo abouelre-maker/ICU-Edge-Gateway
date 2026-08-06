@@ -56,7 +56,9 @@ AVPU_ORU = (
     "OBX|3|NM|57834-7^O2 Therapy^LN||1||||||F|||20240115100000\r"
 )
 
-# Message with waveform (NA type OBX) — should be skipped with warning
+# Message with waveform (NA type OBX) — now parsed into a waveform-carrying
+# VitalSignSample (placeholder scalar value=0.0) alongside the companion NM
+# scalar heart rate OBX. See TestWaveformHandling below.
 WAVEFORM_ORU = (
     "MSH|^~\\&|DRAEGER|ICU|EHR|HOSPITAL|20240115100000||ORU^R01|MSG004|P|2.5.1\r"
     "PID|1||PT-004\r"
@@ -204,26 +206,120 @@ class TestAVPUConsciousnessOBX:
 
 
 class TestWaveformHandling:
-    """NA type OBX (waveform) must be skipped with warning, not crash."""
+    """
+    NA/ED type OBX (waveform) parsing.
 
-    def test_na_waveform_is_skipped(self) -> None:
+    BEHAVIOR CHANGE (documented, deliberate): prior to this revision, NA/ED
+    OBX segments were unconditionally skipped ("Phase 4+ roadmap"). This
+    class previously asserted that skip behavior. The product decision is now
+    to parse NA/ED into a waveform-carrying VitalSignSample so the DSP
+    artifact-rejection pipeline (notch/bandpass/Hampel) can run against real
+    HL7-sourced waveform data. The two tests below that encoded the old
+    "must be skipped" requirement have been renamed and rewritten to assert
+    the new, intentional behavior. `test_na_warning_recorded` needed no
+    change — it only asserts an audit trail entry exists, which remains true.
+    """
+
+    def test_na_waveform_is_parsed_into_sample(self) -> None:
         result = _ADAPTER.parse(WAVEFORM_ORU)
-        # Only the NM heart rate OBX should parse — the NA waveform skipped
-        assert result.skipped_obx_count >= 1
+        assert result.skipped_obx_count == 0, (
+            "Both OBX segments (NA waveform + NM scalar) must parse "
+            "successfully now that waveform support is implemented."
+        )
+        waveform_samples = [
+            s
+            for s in result.samples
+            if s.vital_sign_type is VitalSignType.HEART_RATE and s.waveform is not None
+        ]
+        assert len(waveform_samples) == 1
+        sample = waveform_samples[0]
+        assert sample.waveform == (0.1, 0.2, 0.3, 0.4, 0.1)
+        assert sample.sampling_rate_hz == 250.0  # default table, OBX-6="mV" not numeric
+        assert sample.value == 0.0, (
+            "Scalar value on a waveform-only sample is a fixed, documented "
+            "placeholder — never a clinical reading."
+        )
 
     def test_na_warning_recorded(self) -> None:
         result = _ADAPTER.parse(WAVEFORM_ORU)
         assert any("NA" in w or "waveform" in w.lower() for w in result.parse_warnings)
 
-    def test_numeric_obx_after_waveform_still_parses(self) -> None:
+    def test_companion_numeric_obx_still_parses_as_scalar(self) -> None:
         result = _ADAPTER.parse(WAVEFORM_ORU)
-        hr_samples = [
-            s for s in result.samples if s.vital_sign_type is VitalSignType.HEART_RATE
+        scalar_samples = [
+            s
+            for s in result.samples
+            if s.vital_sign_type is VitalSignType.HEART_RATE and s.waveform is None
         ]
-        assert len(hr_samples) == 1, (
-            "NM OBX after NA OBX must still be parsed. "
-            "IEC 62304 REQ-HL7-003: one bad segment must not abort the message."
+        assert len(scalar_samples) == 1, (
+            "The companion NM OBX after the NA OBX must still be parsed as "
+            "the scalar NEWS2 input. IEC 62304 REQ-HL7-003: one segment's "
+            "handling must not affect another's."
         )
+        assert scalar_samples[0].value == 88.0
+
+    def test_unsupported_waveform_type_is_skipped(self) -> None:
+        """TEMPERATURE_CELSIUS has no configured waveform support (no default
+        sampling rate, and not in the DSP-pipeline's waveform-capable set) —
+        an NA OBX for it must be skipped, not guessed."""
+        msg = (
+            "MSH|^~\\&|DRAEGER|ICU|EHR|HOSPITAL|20240115100000||ORU^R01|MSG099|P|2.5.1\r"
+            "PID|1||PT-099\r"
+            "OBX|1|NA|8310-5^Temperature Waveform^LN||36.5^36.6^36.5|Cel||||F|||20240115100000\r"
+        )
+        result = _ADAPTER.parse(msg)
+        assert result.skipped_obx_count == 1
+        assert any("OBX-WAVEFORM-UNSUPPORTED" in w for w in result.parse_warnings)
+
+    def test_corrupted_waveform_sample_rejects_whole_array(self) -> None:
+        """ISO 14971 HAZARD-WAVE-001: one non-numeric component anywhere in
+        the array must reject the entire segment, not silently drop it."""
+        msg = (
+            "MSH|^~\\&|DRAEGER|ICU|EHR|HOSPITAL|20240115100000||ORU^R01|MSG098|P|2.5.1\r"
+            "PID|1||PT-098\r"
+            "OBX|1|NA|8867-4^ECG^LN||0.1^BAD^0.3|mV||||F|||20240115100000\r"
+        )
+        result = _ADAPTER.parse(msg)
+        assert result.skipped_obx_count == 1
+        assert any("OBX-WAVEFORM-UNPARSEABLE" in w for w in result.parse_warnings)
+
+    def test_obx6_numeric_override_takes_precedence_over_default(self) -> None:
+        msg = (
+            "MSH|^~\\&|DRAEGER|ICU|EHR|HOSPITAL|20240115100000||ORU^R01|MSG097|P|2.5.1\r"
+            "PID|1||PT-097\r"
+            "OBX|1|NA|8867-4^ECG^LN||0.1^0.2^0.3^0.4^0.1^0.2^0.3^0.4^0.1^0.2^0.3^0.4^0.1^0.2^0.3|500||||F|||20240115100000\r"
+        )
+        result = _ADAPTER.parse(msg)
+        sample = next(s for s in result.samples if s.waveform is not None)
+        assert sample.sampling_rate_hz == 500.0
+        assert any("OBX-6 explicit override" in w for w in result.parse_warnings)
+
+    def test_ed_base64_waveform_is_parsed(self) -> None:
+        import base64
+
+        payload = base64.b64encode(b"0.5,0.6,0.7,0.6,0.5").decode("ascii")
+        msg = (
+            "MSH|^~\\&|MINDRAY|ICU|EHR|HOSPITAL|20240115100000||ORU^R01|MSG096|P|2.5.1\r"
+            "PID|1||PT-096\r"
+            f"OBX|1|ED|59408-5^Pleth^LN||LOCAL^WAVEFORM^PLETH^Base64^{payload}|%||||F|||20240115100000\r"
+            "OBX|2|NM|59408-5^SpO2^LN||97|%||||F|||20240115100000\r"
+        )
+        result = _ADAPTER.parse(msg)
+        assert result.skipped_obx_count == 0
+        wave = next(s for s in result.samples if s.waveform is not None)
+        assert wave.vital_sign_type is VitalSignType.SPO2
+        assert wave.waveform == (0.5, 0.6, 0.7, 0.6, 0.5)
+        assert wave.sampling_rate_hz == 62.5  # SPO2 default
+
+    def test_ed_unsupported_encoding_is_skipped(self) -> None:
+        msg = (
+            "MSH|^~\\&|MINDRAY|ICU|EHR|HOSPITAL|20240115100000||ORU^R01|MSG095|P|2.5.1\r"
+            "PID|1||PT-095\r"
+            "OBX|1|ED|59408-5^Pleth^LN||LOCAL^WAVEFORM^PLETH^RawBinary^somebytes|%||||F|||20240115100000\r"
+        )
+        result = _ADAPTER.parse(msg)
+        assert result.skipped_obx_count == 1
+        assert any("OBX-ED-ENCODING" in w for w in result.parse_warnings)
 
 
 class TestPartialAndErrorHandling:
@@ -324,3 +420,4 @@ class TestParseNumeric:
 
     def test_pure_text_returns_none(self) -> None:
         assert _parse_numeric("ALERT") is None
+

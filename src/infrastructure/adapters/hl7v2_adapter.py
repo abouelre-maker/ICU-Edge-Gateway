@@ -7,7 +7,9 @@ hospitals) to the domain's VitalSignSample entities.
 Supported protocol variants:
   - HL7 v2.3 – v2.8 ORU^R01 messages
   - OBX value types: NM (Numeric), ST (String), SN (Structured Numeric)
-  - NA (Numeric Array) waveform: detected and skipped with audit warning
+  - NA (Numeric Array) and ED (Encapsulated Data) waveform: parsed into
+    VitalSignSample.waveform for the DSP artifact-rejection pipeline. See
+    _build_waveform_sample for the exact supported subset and known limits.
   - Vendor dialects: Philips IntelliVue / GE CARESCAPE / Dräger Infinity /
     Mindray Beneview / Nihon Kohden / Generic (LOINC fallback)
 
@@ -16,11 +18,22 @@ from the pure domain model.
 ISO 14971 HAZARD-PROTO-001: Vendor dialect misidentification silently drops OBX
 segments. Mitigation: explicit MSH-3 vendor map + LOINC fallback for all OBX-3
 identifiers.
+ISO 14971 HAZARD-PROTO-002: HL7 v2.x has no standardized field for continuous
+waveform sampling rate. This adapter resolves it via an explicit, documented
+per-VitalSignType default table with an optional OBX-6 numeric override —
+NOT a claim of a universal HL7 standard. The default table MUST be validated
+against each connected monitor's actual interface specification before the
+waveform DSP pipeline is used clinically against that monitor model.
+ISO 14971 HAZARD-WAVE-001: A waveform array with any single unparseable sample
+is rejected in its entirety (never silently truncated/reindexed) — a partial
+array would corrupt sample timing ahead of notch/bandpass/Hampel processing.
 SOUP: hl7apy==1.3.4 — version pinned in requirements.txt per IEC 62304 §8.1.2.
 """
 
 from __future__ import annotations
 
+import base64
+import binascii
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -158,6 +171,31 @@ _DEFAULT_UNIT: Final[dict[VitalSignType, VitalSignUnit]] = {
     VitalSignType.TEMPERATURE_CELSIUS: VitalSignUnit.CELSIUS,
     VitalSignType.CONSCIOUSNESS: VitalSignUnit.AVPU_SCALE,
     VitalSignType.SUPPLEMENTAL_O2: VitalSignUnit.BOOLEAN,
+}
+
+# Documented default sampling rates (Hz) for continuous waveform channels, by
+# VitalSignType. HL7 v2.x has NO dedicated, universally-standardized field for
+# waveform sampling rate — this table is an explicit engineering decision, not
+# a claim of a single HL7 standard. Values reflect commonly observed ICU
+# bedside-monitor waveform export rates for these channel types.
+#
+# ISO 14971 HAZARD-PROTO-002: An incorrect sampling rate corrupts every
+# downstream DSP stage (notch target frequency, bandpass range, Hampel
+# timing). This table MUST be validated against the specific connected
+# monitor's interface specification before clinical use of the waveform
+# pipeline against that monitor model. An explicit OBX-6 numeric override is
+# also honored — see _resolve_sampling_rate_hz.
+#
+# This set of keys MUST stay in sync with
+# domain.services.signal_processor._WAVEFORM_CAPABLE_TYPES — guarded by
+# tests/integration/test_hl7v2_waveform_pipeline.py::
+# test_waveform_capable_types_match_signal_processor.
+_WAVEFORM_DEFAULT_SAMPLING_RATE_HZ: Final[dict[VitalSignType, float]] = {
+    VitalSignType.HEART_RATE: 250.0,  # ECG-derived waveform
+    VitalSignType.RESPIRATORY_RATE: 62.5,  # Impedance respiration waveform
+    VitalSignType.SPO2: 62.5,  # Plethysmograph (pleth) waveform
+    VitalSignType.SYSTOLIC_BP: 125.0,  # Arterial pressure waveform
+    VitalSignType.DIASTOLIC_BP: 125.0,  # Arterial pressure waveform
 }
 
 
@@ -358,7 +396,8 @@ class HL7v2Adapter:
 
         Returns None when:
         - OBX-3 identifier cannot be mapped to a VitalSignType (unknown code)
-        - OBX-2 value type is NA or ED (waveform — unsupported in v1.0)
+        - OBX-2 value type is NA/ED but the resolved VitalSignType has no
+          configured waveform support, or the array is empty/unparseable
         - OBX-5 value is empty or unparseable
         - OBX-11 result status is not F (Final) or P (Preliminary)
 
@@ -374,21 +413,26 @@ class HL7v2Adapter:
             )
             return None
 
-        # OBX-2: Value Type — skip waveform types (Phase 4+ roadmap)
-        value_type = _safe_field(obx, "obx_2").upper().strip()
-        if value_type in {"NA", "ED"}:
-            warnings.append(
-                f"[OBX-SKIP] OBX-2 value type '{value_type}' (waveform data) "
-                "is not supported in v1.0. "
-                "See roadmap: Phase 4 waveform streaming support."
-            )
-            return None
-
-        # OBX-3: Observation Identifier → VitalSignType
+        # OBX-3: Observation Identifier → VitalSignType.
+        # Resolved before the value-type branch below so waveform handling can
+        # consult the per-type sampling-rate default table.
         obx_3_str = _safe_field(obx, "obx_3")
         vital_type = self._resolve_vital_type(obx_3_str, vendor, warnings)
         if vital_type is None:
             return None
+
+        # OBX-2: Value Type — NA (Numeric Array) / ED (Encapsulated Data) carry
+        # continuous waveform data and are routed to the dedicated builder.
+        value_type = _safe_field(obx, "obx_2").upper().strip()
+        if value_type in {"NA", "ED"}:
+            return self._build_waveform_sample(
+                obx=obx,
+                value_type=value_type,
+                vital_type=vital_type,
+                device_id=device_id,
+                msg_timestamp=msg_timestamp,
+                warnings=warnings,
+            )
 
         # OBX-5: Observation Value
         raw_value = _safe_field(obx, "obx_5").strip()
@@ -504,6 +548,163 @@ class HL7v2Adapter:
             "f": VitalSignUnit.FAHRENHEIT,
         }
         return unit_map.get(u, _DEFAULT_UNIT.get(vital_type, VitalSignUnit.PERCENT))
+
+    def _build_waveform_sample(
+        self,
+        obx: object,
+        value_type: str,
+        vital_type: VitalSignType,
+        device_id: str,
+        msg_timestamp: datetime,
+        warnings: list[str],
+    ) -> VitalSignSample | None:
+        """
+        Parse an HL7 NA (Numeric Array) or ED (Encapsulated Data) OBX segment
+        into a waveform-carrying VitalSignSample for the DSP pipeline.
+
+        Supported:
+          - NA: OBX-5 is a caret-separated list of numeric samples
+            (e.g. "72.1^72.3^72.5"), per the HL7 v2.x NA data type definition.
+          - ED: OBX-5 is SourceApplication^TypeOfData^DataSubtype^Encoding^Data.
+            Encoding "A" (plain text) or "Base64" is supported; the decoded
+            payload must itself be a caret- or comma-separated numeric list.
+
+        OUT OF SCOPE, explicitly (not silently guessed): raw binary waveform
+        encodings (e.g. int16 PCM, IEEE-754 float arrays) inside an ED payload.
+        If the decoded content is not delimited numeric text, the segment is
+        skipped with a warning.
+
+        Sampling rate resolution and the fail-whole-array rule are documented
+        in _resolve_sampling_rate_hz and _parse_numeric_array respectively —
+        see ISO 14971 HAZARD-PROTO-002 and HAZARD-WAVE-001 in the module
+        docstring.
+
+        The scalar `value` field on the returned sample is fixed at 0.0 and is
+        NOT a clinical reading — VitalSignSample.value is a mandatory field
+        with no meaning for a pure waveform channel. 0.0 is deliberately below
+        every currently configured PhysiologicalBoundsChecker lower bound for
+        every waveform-capable type (HEART_RATE, RESPIRATORY_RATE, SPO2,
+        SYSTOLIC_BP, DIASTOLIC_BP — see domain/services/artifact_rejector.py
+        _PHYSIOLOGICAL_BOUNDS), so PhysiologicalBoundsChecker.check() marks
+        is_within_physiological_bounds=False and NEWS2Calculator._extract_value()
+        (which filters on exactly that flag) can never select this placeholder
+        as a scoring input. The scalar NEWS2 value for this vital sign type
+        MUST arrive via a companion NM OBX segment — unchanged pre-existing
+        design, exercised by tests/regulatory/test_news2_safety.py. This
+        invariant is regression-guarded by
+        tests/integration/test_hl7v2_waveform_pipeline.py::
+        TestWaveformNeverFeedsNews2Score.
+
+        Known side effect (documented, non-hazardous): because the placeholder
+        is out-of-bounds by design, ObservationBuilder currently renders its
+        FHIR Observation with dataAbsentReason="out-of-range" rather than a
+        more semantically precise code. This is a cosmetic FHIR labeling item
+        for a follow-up change to infrastructure/fhir/observation_builder.py —
+        not a clinical or DSP defect — and is out of scope for this change.
+        """
+        if vital_type not in _WAVEFORM_DEFAULT_SAMPLING_RATE_HZ:
+            warnings.append(
+                f"[OBX-WAVEFORM-UNSUPPORTED] {value_type} waveform for "
+                f"{vital_type.name} has no configured DSP waveform support "
+                "(supported: HEART_RATE, RESPIRATORY_RATE, SPO2, SYSTOLIC_BP, "
+                "DIASTOLIC_BP). Segment skipped."
+            )
+            return None
+
+        raw_value = _safe_field(obx, "obx_5").strip()
+        if not raw_value:
+            warnings.append(
+                f"[OBX-WAVEFORM-EMPTY] OBX-5 is empty for {value_type} "
+                f"{vital_type.name} waveform. Segment skipped."
+            )
+            return None
+
+        if value_type == "NA":
+            array_text: str | None = raw_value
+        else:  # ED
+            array_text = _decode_ed_payload(raw_value, warnings)
+            if array_text is not None:
+                array_text = array_text.replace(",", "^")
+
+        samples = _parse_numeric_array(array_text) if array_text is not None else None
+        if not samples:
+            warnings.append(
+                f"[OBX-WAVEFORM-UNPARSEABLE] Could not parse {value_type} "
+                f"waveform array for {vital_type.name} from OBX-5 "
+                "(ED payload decode failed, or one or more samples were "
+                "non-numeric). ISO 14971 HAZARD-WAVE-001: the entire array is "
+                "rejected rather than partially parsed. Segment skipped."
+            )
+            return None
+
+        obx_6 = _safe_field(obx, "obx_6")
+        sampling_rate_hz, rate_source = self._resolve_sampling_rate_hz(
+            unit_str=obx_6,
+            vital_type=vital_type,
+        )
+        if sampling_rate_hz is None:
+            warnings.append(
+                f"[OBX-WAVEFORM-NO-RATE] No sampling rate available for "
+                f"{vital_type.name} waveform (no OBX-6 override, no default "
+                "configured). Segment skipped."
+            )
+            return None
+
+        obs_ts_str = _safe_field(obx, "obx_14")
+        obs_timestamp = _parse_hl7_datetime(obs_ts_str) if obs_ts_str else msg_timestamp
+        unit = self._resolve_unit(unit_str=obx_6, vital_type=vital_type)
+
+        warnings.append(
+            f"[OBX-WAVEFORM] Parsed {value_type} waveform for {vital_type.name}: "
+            f"{len(samples)} sample(s) at {sampling_rate_hz:.1f} Hz ({rate_source}). "
+            "Scalar NEWS2 value for this vital sign, if any, must arrive via a "
+            "companion NM OBX segment."
+        )
+
+        return VitalSignSample(
+            vital_sign_type=vital_type,
+            value=0.0,  # Placeholder — see docstring. Never used for NEWS2 scoring.
+            unit=unit,
+            timestamp=obs_timestamp,
+            waveform=samples,
+            sampling_rate_hz=sampling_rate_hz,
+            device_id=device_id,
+        )
+
+    @staticmethod
+    def _resolve_sampling_rate_hz(
+        unit_str: str,
+        vital_type: VitalSignType,
+    ) -> tuple[float | None, str]:
+        """
+        Resolve the waveform sampling rate in Hz, plus a human-readable source
+        label for the audit log.
+
+        HL7 v2.x has no standardized field for continuous-waveform sampling
+        rate. Resolution order:
+          1. OBX-6 explicit numeric override — some vendor interfaces place the
+             rate directly in the units field for waveform channels; accepted
+             only if the leading component parses as a positive number.
+          2. Documented per-VitalSignType clinical default
+             (_WAVEFORM_DEFAULT_SAMPLING_RATE_HZ).
+          3. (None, ...) if neither is available — caller must skip the segment.
+
+        ISO 14971 HAZARD-PROTO-002: see module docstring. The default table is
+        an engineering decision requiring site-specific validation, not a
+        universal HL7 standard.
+        """
+        override = _parse_numeric(unit_str.split("^")[0].strip())
+        if override is not None and override > 0:
+            return override, "OBX-6 explicit override"
+
+        default = _WAVEFORM_DEFAULT_SAMPLING_RATE_HZ.get(vital_type)
+        if default is not None:
+            return (
+                default,
+                "default table — validate against connected monitor's interface spec",
+            )
+
+        return None, "no source available"
 
     @staticmethod
     def _build_consciousness_sample(
@@ -689,3 +890,85 @@ def _parse_numeric(raw: str) -> float | None:
             pass
 
     return None
+
+
+def _parse_numeric_array(raw: str) -> tuple[float, ...] | None:
+    """
+    Parse an HL7 NA (Numeric Array) OBX-5 value: a caret-separated list of
+    numeric samples, e.g. "72.1^72.3^72.5^72.2".
+
+    ISO 14971 HAZARD-WAVE-001: If ANY component fails to parse as a number,
+    the entire array is rejected (returns None) rather than silently dropping
+    the bad sample. A partially-parsed / re-indexed array would corrupt
+    sample timing ahead of notch/bandpass/Hampel processing — rejecting the
+    whole segment (and letting the caller warn + skip) is the safer failure
+    mode for a signal about to be filtered.
+
+    Returns None if the string is empty, contains no components, or any
+    component is not numeric.
+    """
+    parts = [p.strip() for p in raw.split("^")]
+    parts = [p for p in parts if p != ""]
+    if not parts:
+        return None
+
+    values: list[float] = []
+    for part in parts:
+        numeric = _parse_numeric(part)
+        if numeric is None:
+            return None  # fail the whole array — see docstring
+        values.append(numeric)
+
+    return tuple(values)
+
+
+def _decode_ed_payload(raw: str, warnings: list[str]) -> str | None:
+    """
+    Decode an HL7 ED (Encapsulated Data) OBX-5 value into a plain delimited
+    numeric-array string, ready for _parse_numeric_array.
+
+    HL7 v2.x ED components: SourceApplication^TypeOfData^DataSubtype^Encoding^Data.
+    Supported encodings:
+      - "A"      : Data is already plain text (no decoding needed).
+      - "Base64" : Data is Base64-encoded ASCII text of a delimited numeric
+                   array (caret- or comma-separated).
+
+    OUT OF SCOPE, explicitly: raw binary sample formats (e.g. int16 PCM,
+    IEEE-754 float arrays) inside the Base64 payload are vendor-specific and
+    are NOT decoded here. If the decoded bytes are not valid ASCII text, the
+    segment is skipped with a warning rather than guessed at.
+    """
+    components = raw.split("^")
+    if len(components) < 5:
+        warnings.append(
+            "[OBX-ED-MALFORMED] ED value has fewer than 5 components — "
+            "expected SourceApplication^TypeOfData^DataSubtype^Encoding^Data."
+        )
+        return None
+
+    encoding = components[3].strip().upper()
+    data = components[4]
+
+    if encoding in {"A", ""}:
+        return data
+
+    if encoding in {"BASE64", "B64"}:
+        try:
+            decoded_bytes = base64.b64decode(data, validate=False)
+            return decoded_bytes.decode("ascii", errors="strict")
+        except (binascii.Error, UnicodeDecodeError, ValueError) as exc:
+            warnings.append(
+                f"[OBX-ED-DECODE] Base64 ED payload did not decode to ASCII "
+                f"text: {exc}. Raw binary waveform formats (e.g. int16 PCM, "
+                "IEEE-754 float arrays) are out of scope for this parser."
+            )
+            return None
+
+    warnings.append(
+        f"[OBX-ED-ENCODING] Unsupported ED encoding '{encoding}'. "
+        "Only 'A' (plain text) and 'Base64' (ASCII-encoded numeric text) "
+        "are supported."
+    )
+    return None
+
+
