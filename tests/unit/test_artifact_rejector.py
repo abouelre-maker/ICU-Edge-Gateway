@@ -114,6 +114,68 @@ class TestBandpassFilter:
             f.apply(np.array([1.0, 2.0, 3.0]), _FS)
 
 
+class TestBandpassFilterEdgeMarginSamples:
+    """
+    ISO 14971 HAZARD-DSP-006: filtfilt boundary-transient margin.
+
+    Golden values derived independently via scipy.signal.group_delay at each
+    filter's passband geometric-mean frequency, x2 for filtfilt's
+    forward+backward pass, ceil'd. See conversation record / risk register
+    for the full derivation. Recomputing these inline (rather than importing
+    the golden constants) would make the test tautological.
+    """
+
+    def test_heart_rate_margin_at_default_250hz(self) -> None:
+        f = BandpassFilter(vital_sign_type=VitalSignType.HEART_RATE)
+        assert f.edge_margin_samples(250.0) == 8
+
+    def test_heart_rate_margin_at_200hz_override(self) -> None:
+        """
+        Matches the empirically observed HAZARD-DSP-006 reproduction:
+        DualNotch -> Bandpass(200 Hz) -> Hampel flagged indices [398, 399]
+        of a 400-sample array — within the last 7 samples this margin
+        computes.
+        """
+        f = BandpassFilter(vital_sign_type=VitalSignType.HEART_RATE)
+        assert f.edge_margin_samples(200.0) == 7
+
+    def test_respiratory_rate_margin_is_the_documented_worst_case(self) -> None:
+        """
+        RESPIRATORY_RATE has the lowest passband (0.1-1.0 Hz) of all
+        configured types, hence the slowest group delay and the largest
+        margin among the five vital sign types.
+        """
+        f = BandpassFilter(vital_sign_type=VitalSignType.RESPIRATORY_RATE)
+        assert f.edge_margin_samples(62.5) == 89
+
+    def test_spo2_margin_at_default_62_5hz(self) -> None:
+        f = BandpassFilter(vital_sign_type=VitalSignType.SPO2)
+        assert f.edge_margin_samples(62.5) == 18
+
+    def test_systolic_bp_margin_at_default_125hz(self) -> None:
+        f = BandpassFilter(vital_sign_type=VitalSignType.SYSTOLIC_BP)
+        assert f.edge_margin_samples(125.0) == 4
+
+    def test_diastolic_bp_margin_at_default_125hz(self) -> None:
+        f = BandpassFilter(vital_sign_type=VitalSignType.DIASTOLIC_BP)
+        assert f.edge_margin_samples(125.0) == 4
+
+    def test_margin_is_never_negative(self) -> None:
+        for vital_type in (
+            VitalSignType.HEART_RATE,
+            VitalSignType.RESPIRATORY_RATE,
+            VitalSignType.SPO2,
+            VitalSignType.SYSTOLIC_BP,
+            VitalSignType.DIASTOLIC_BP,
+        ):
+            f = BandpassFilter(vital_sign_type=vital_type)
+            assert f.edge_margin_samples(_FS) >= 0
+
+    def test_margin_is_deterministic(self) -> None:
+        f = BandpassFilter(vital_sign_type=VitalSignType.HEART_RATE)
+        assert f.edge_margin_samples(250.0) == f.edge_margin_samples(250.0)
+
+
 class TestHampelFilter:
     """ISO 14971 HAZARD-DSP-003: Motion artifact spike detection."""
 

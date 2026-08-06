@@ -127,10 +127,14 @@ class VitalSignProcessor:
                 notes.append(f"[NOTCH-SKIP] {e}")
 
             # Stage 3: Bandpass (signal-type specific)
+            edge_margin = 0
             if sample.vital_sign_type in _WAVEFORM_CAPABLE_TYPES:
                 try:
                     bp_filter = BandpassFilter(vital_sign_type=sample.vital_sign_type)
                     bandpassed = bp_filter.apply(notched, rate)
+                    edge_margin = min(
+                        bp_filter.edge_margin_samples(rate), len(bandpassed) // 2
+                    )
                     notes.append(
                         f"[BANDPASS] Applied for {sample.vital_sign_type.name}."
                     )
@@ -143,7 +147,27 @@ class VitalSignProcessor:
             # Stage 4: Hampel Motion Artifact Rejection
             try:
                 result_arr, mask = self.hampel_filter.apply_with_mask(bandpassed)
-                outlier_count = int(np.sum(mask))
+
+                # HAZARD-DSP-006 mitigation: samples within the bandpass
+                # filter's filtfilt edge-transient zone are still median-
+                # replaced (cleaned_waveform is unaffected below) but are
+                # reclassified out of motion-artifact accounting, since
+                # Hampel's local statistics cannot distinguish a genuine
+                # short artifact from filtfilt boundary ringing there.
+                # KNOWN, ACCEPTED TRADE-OFF: a real motion artifact that
+                # happens to fall inside this margin will also be excluded
+                # from outlier_count / the FHIR dsp-outlier-count extension
+                # (its value is still corrected) — see
+                # tests/integration/test_hl7v2_waveform_pipeline.py for the
+                # explicit regression test documenting this limitation.
+                edge_zone = np.zeros_like(mask)
+                if edge_margin > 0:
+                    edge_zone[:edge_margin] = True
+                    edge_zone[-edge_margin:] = True
+                core_mask = mask & ~edge_zone
+                edge_flagged = mask & edge_zone
+
+                outlier_count = int(np.sum(core_mask))
                 if outlier_count > 0:
                     notes.append(
                         f"[HAMPEL] {outlier_count} motion artifact sample(s) "
@@ -151,6 +175,17 @@ class VitalSignProcessor:
                     )
                 else:
                     notes.append("[HAMPEL] No motion artifacts detected.")
+
+                edge_flagged_count = int(np.sum(edge_flagged))
+                if edge_flagged_count > 0:
+                    notes.append(
+                        f"[HAMPEL-EDGE] {edge_flagged_count} sample(s) within "
+                        f"the bandpass filter's edge-transient zone "
+                        f"(±{edge_margin} samples, filtfilt boundary "
+                        "effect) excluded from motion-artifact "
+                        "classification (HAZARD-DSP-006)."
+                    )
+
                 cleaned_waveform = tuple(float(v) for v in result_arr)
             except ValueError as e:
                 notes.append(f"[HAMPEL-SKIP] {e}")

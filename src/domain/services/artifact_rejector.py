@@ -12,7 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.signal import butter, filtfilt, iirnotch
+from scipy.signal import butter, filtfilt, group_delay, iirnotch
 
 from domain.entities.vital_sign import VitalSignType
 from domain.interfaces.i_filter_strategy import IFilterStrategy
@@ -93,6 +93,44 @@ class BandpassFilter:
         )
         padlen = min(150, len(signal) - 1)
         return filtfilt(b, a, signal.astype(np.float64), padlen=padlen)
+
+    def edge_margin_samples(self, sampling_rate_hz: float) -> int:
+        """
+        HAZARD-DSP-006 mitigation: width (in samples) of this filter's
+        filtfilt boundary-transient zone, used downstream (signal_processor.py)
+        to exclude edge samples from motion-artifact classification WITHOUT
+        altering this filter's validated output values (apply() above is
+        untouched by this method).
+
+        Basis: group delay of the single-pass IIR filter evaluated at the
+        passband's geometric-mean ("center") frequency — the standard
+        filter-design measure of the delay a genuine in-band signal
+        experiences through this filter. Evaluating exactly at a cutoff
+        frequency is deliberately avoided: Butterworth phase response is
+        steepest there, making the raw transfer-function group delay
+        numerically near-singular and not representative of real edge
+        distortion (empirically, several hundred samples — larger than
+        many waveform arrays — versus the few samples actually observed).
+        filtfilt applies the filter twice (forward + backward), so the
+        margin is 2x the single-pass group delay.
+        """
+        low, high = _BANDPASS_RANGES[self.vital_sign_type]
+        nyquist = sampling_rate_hz / 2.0
+        if high >= nyquist:
+            high = nyquist * 0.95
+
+        b, a = butter(
+            N=self.order, Wn=[low, high], btype="bandpass", fs=sampling_rate_hz
+        )
+        center_hz = (low * high) ** 0.5
+        w = np.array([center_hz * (2 * np.pi / sampling_rate_hz)])
+        _, gd = group_delay((b, a), w=w)
+        # Group delay of a causal, stable filter is never negative; a
+        # negative value here is a numerical artifact of evaluating near a
+        # near-singular phase region (e.g. a very narrow passband relative
+        # to sampling_rate_hz), not a real filter property. Clamp rather
+        # than propagate a physically meaningless negative margin.
+        return max(0, int(np.ceil(2.0 * float(gd[0]))))
 
 
 @dataclass(frozen=True)
