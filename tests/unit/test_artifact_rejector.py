@@ -2,7 +2,7 @@
 Unit Tests — DSP Artifact Rejection Pipeline.
 
 IEC 62304 §5.7: Verification of all filter implementations.
-ISO 14971 HAZARD-DSP-001 through HAZARD-DSP-004.
+ISO 14971 HAZARD-DSP-001/002/003, plus HAZARD-DSP-006 edge-margin coverage.
 """
 
 from __future__ import annotations

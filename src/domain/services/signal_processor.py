@@ -8,8 +8,10 @@ Applies the full artifact rejection pipeline to a VitalSignSample:
   Stage 4: Hampel motion artifact rejection (waveform — if present)
 
 IEC 62304 §5.3: Single-responsibility orchestrator — contains no filter logic itself.
-ISO 14971 HAZARD-DSP-001 through HAZARD-DSP-004: Controls addressed by the
-injected filter instances; this class manages execution order only.
+ISO 14971 HAZARD-DSP-001/002/003: Controls addressed by the injected filter
+instances (DualNotchFilter / BandpassFilter / HampelFilter respectively);
+this class manages execution order and stage-boundary reclassification only
+(see HAZARD-DSP-005, HAZARD-DSP-006 below for orchestration-level findings).
 """
 
 from __future__ import annotations
