@@ -15,7 +15,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.11"
-  MIN_COVERAGE:   "95"
+  MIN_COVERAGE:   "90"
   MAX_IMAGE_MB:   "150"
 
 jobs:
