@@ -49,7 +49,7 @@ jobs:
 
       # ── Step 3: Bandit SAST ──────────────────────────────────────────────────
       - name: "Bandit — static application security testing (IEC 81001-5-1)"
-        run: bandit --recursive src/ --level low --quiet
+        run: bandit --recursive src/ --severity-level low --quiet
 
       # ── Step 4: pip-audit Dependency Vulnerability Scan ─────────────────────
       - name: "pip-audit — dependency CVE scan"
