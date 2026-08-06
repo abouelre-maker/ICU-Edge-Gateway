@@ -17,6 +17,7 @@ import uvicorn
 from api.v1.health import router as health_router
 from api.v1.ingest import router as ingest_router
 from api.v1.vitals import router as vitals_router
+from config import get_cors_allowed_origins
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -69,10 +70,11 @@ def create_app() -> FastAPI:
     )
 
     # ── Middleware ─────────────────────────────────────────────────────────────
-    # NOTE: In production, restrict allow_origins to specific EHR endpoints.
+    # HAZARD-CORS-001: origins come from CORS_ALLOWED_ORIGINS (explicit
+    # allow-list); wildcard is rejected at startup by get_cors_allowed_origins().
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=get_cors_allowed_origins(),
         allow_credentials=False,
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type", "Accept", "X-Request-ID"],
