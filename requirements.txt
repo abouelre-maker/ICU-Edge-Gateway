@@ -4,3 +4,5 @@ pytest
 pytest-cov
 structlog
 hl7apy
+fastapi
+uvicorn
