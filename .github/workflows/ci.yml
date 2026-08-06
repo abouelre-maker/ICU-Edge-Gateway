@@ -76,7 +76,7 @@ jobs:
 
   # ─── Job 2: Docker Build, Size Check & Smoke Test ────────────────────────────
   docker-build:
-    name: Docker Build — Alpine 3.19, Edge-Optimized (<${{ env.MAX_IMAGE_MB }}MB)
+    name: Docker Build — Alpine 3.19, Edge-Optimized (size-limited)
     runs-on: ubuntu-latest
     needs: quality-gate  # Only run if quality gate passes
 
