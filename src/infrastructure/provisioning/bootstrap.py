@@ -35,6 +35,8 @@ async def ensure_device_identity(
     device_common_name: str,
     enrollment_client: DeviceEnrollmentClient | None = None,
     max_attempts: int = 5,
+    ca_bundle_path: str | None = None,
+    expected_hostname: str | None = None,
 ) -> bool:
     """
     Ensure this device has a valid mTLS identity, enrolling if necessary.
@@ -46,6 +48,9 @@ async def ensure_device_identity(
     `enrollment_client` is injectable for testing (an httpx.MockTransport-
     backed client) -- if omitted, a real DeviceEnrollmentClient talking to
     `bootstrap_url` is constructed and closed by this function.
+    `ca_bundle_path`/`expected_hostname` are forwarded to that constructed
+    client (see enrollment_client.py's HAZARD-STREAM-010 update) and are
+    ignored when `enrollment_client` is injected.
     """
     if cert_store.has_valid_identity():
         _log.info("provisioning.bootstrap.identity_already_valid")
@@ -58,7 +63,10 @@ async def ensure_device_identity(
 
     owns_client = enrollment_client is None
     client = enrollment_client or DeviceEnrollmentClient(
-        bootstrap_url, max_attempts=max_attempts
+        bootstrap_url,
+        max_attempts=max_attempts,
+        ca_bundle_path=ca_bundle_path,
+        expected_hostname=expected_hostname,
     )
     try:
         credentials = await client.enroll(enrollment_token, csr_pem)

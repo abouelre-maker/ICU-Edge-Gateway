@@ -58,6 +58,23 @@ class TestMainConfigurationError:
 
         assert exit_code == 1
 
+    async def test_returns_1_when_ca_bundle_path_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """HAZARD-STREAM-010 (server-authentication leg): a device must not
+        silently fall back to the system CA bundle just because the operator
+        forgot to set PROVISIONING_CA_BUNDLE_PATH."""
+        monkeypatch.setenv("PROVISIONING_ENABLED", "true")
+        monkeypatch.setenv(
+            "PROVISIONING_BOOTSTRAP_URL", "https://control-plane.example.org"
+        )
+        monkeypatch.setenv("ENROLLMENT_TOKEN", "some-token")
+        monkeypatch.delenv("PROVISIONING_CA_BUNDLE_PATH", raising=False)
+
+        exit_code = await bootstrap_cli._main()
+
+        assert exit_code == 1
+
 
 class TestMainEnrollmentOutcomes:
     def _set_valid_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -66,6 +83,7 @@ class TestMainEnrollmentOutcomes:
             "PROVISIONING_BOOTSTRAP_URL", "https://control-plane.example.org"
         )
         monkeypatch.setenv("ENROLLMENT_TOKEN", "valid-token")
+        monkeypatch.setenv("PROVISIONING_CA_BUNDLE_PATH", "/fake/ca-bundle.pem")
 
     async def test_returns_0_on_successful_enrollment(
         self, monkeypatch: pytest.MonkeyPatch
