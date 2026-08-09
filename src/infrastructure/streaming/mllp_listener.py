@@ -187,9 +187,7 @@ class MLLPListener:
                 await writer.wait_closed()
             log.info("mllp_listener.connection.close")
 
-    async def _read_frame(
-        self, reader: asyncio.StreamReader, log: Any
-    ) -> bytes | None:
+    async def _read_frame(self, reader: asyncio.StreamReader, log: Any) -> bytes | None:
         """
         Read one complete MLLP frame (between VT and FS+CR), or None on clean EOF.
 
@@ -221,9 +219,7 @@ class MLLPListener:
 
     # ── Pipeline Invocation ───────────────────────────────────────────────────
 
-    def _process_frame(
-        self, frame: bytes, log: Any
-    ) -> MLLPIngestOutcome:
+    def _process_frame(self, frame: bytes, log: Any) -> MLLPIngestOutcome:
         try:
             raw_hl7 = frame.decode("utf-8", errors="strict")
         except UnicodeDecodeError as exc:
