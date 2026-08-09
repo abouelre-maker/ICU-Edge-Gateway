@@ -18,3 +18,18 @@ uvicorn
 # against a proper SCA tool before production sign-off. See
 # src/infrastructure/streaming/mqtt_publisher.py module docstring.
 paho-mqtt==2.1.0
+# SOUP (IEC 62304 §8.1.2): httpx==0.25.2 (Encode). Promoted from a
+# requirements-dev.txt test-only dependency to a production runtime
+# dependency per Phase 5 Section A (FHIR R4 Subscription rest-hook
+# delivery needs an async HTTP client). Version unchanged from what this
+# repo's entire existing test suite already exercises via
+# tests/conftest.py's ASGI test client -- not bumped to the newer 0.28.1
+# upstream release as part of this change.
+# Vetting note (2026-08-09): Endor Labs automated SCA review could not run
+# in this environment (same constraint as paho-mqtt above). Manual web
+# research: the one CVE found, CVE-2021-41945 (an SSRF-adjacent input-
+# validation issue in httpx.URL.copy_with), was fixed in 0.23.0 -- this
+# pin is unaffected. WEB-SOURCED, NOT ENDOR-VERIFIED -- flagged for human
+# re-verification before production sign-off. See
+# src/infrastructure/streaming/subscription_dispatcher.py module docstring.
+httpx==0.25.2

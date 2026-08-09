@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager
 
 import structlog
 import uvicorn
+from api.v1.fhir_subscription import router as fhir_subscription_router
 from api.v1.health import router as health_router
 from api.v1.ingest import router as ingest_router
 from api.v1.live import router as live_router
@@ -33,6 +34,8 @@ from infrastructure.streaming.live_dashboard_channel import LiveDashboardChannel
 from infrastructure.streaming.mllp_listener import MLLPListener
 from infrastructure.streaming.mqtt_publisher import MQTTPublisher
 from infrastructure.streaming.ring_buffer import StoreAndForwardRingBuffer
+from infrastructure.streaming.subscription_dispatcher import SubscriptionDispatcher
+from infrastructure.streaming.subscription_registry import SubscriptionRegistry
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -66,12 +69,22 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     Every ingestion path (MLLP, POST /api/v1/ingest, POST /api/v1/vitals)
     pushes a delta through it. See
     infrastructure/streaming/live_dashboard_channel.py.
+
+    A SubscriptionRegistry + SubscriptionDispatcher are likewise always
+    created so POST /api/v1/fhir/Subscription is available regardless of
+    MLLP/MQTT config; the dispatcher's httpx.AsyncClient is closed on
+    shutdown. See infrastructure/fhir/subscription.py and
+    infrastructure/streaming/subscription_dispatcher.py.
     """
     app.state.start_time = time.monotonic()
     app.state.forward_buffer = StoreAndForwardRingBuffer(
         capacity=_FORWARD_BUFFER_CAPACITY
     )
     app.state.live_dashboard_channel = LiveDashboardChannel()
+    app.state.subscription_registry = SubscriptionRegistry()
+    app.state.subscription_dispatcher = SubscriptionDispatcher(
+        registry=app.state.subscription_registry
+    )
     app.state.mllp_listener = None
     app.state.mqtt_publisher = None
 
@@ -81,6 +94,7 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
             port=get_mllp_port(),
             forward_buffer=app.state.forward_buffer,
             live_channel=app.state.live_dashboard_channel,
+            subscription_dispatcher=app.state.subscription_dispatcher,
         )
         await listener.start()
         app.state.mllp_listener = listener
@@ -119,6 +133,7 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
         await app.state.mqtt_publisher.stop()
     if app.state.mllp_listener is not None:
         await app.state.mllp_listener.stop()
+    await app.state.subscription_dispatcher.aclose()
     uptime = round(time.monotonic() - app.state.start_time, 2)
     _log.info("icu_edge_gateway.shutdown", uptime_seconds=uptime)
 
@@ -221,6 +236,9 @@ def create_app() -> FastAPI:
     app.include_router(ingest_router, prefix="/api/v1")  # POST /api/v1/ingest
     app.include_router(vitals_router, prefix="/api/v1")  # POST /api/v1/vitals
     app.include_router(live_router, prefix="/api/v1")  # WS   /api/v1/live/vitals
+    app.include_router(
+        fhir_subscription_router, prefix="/api/v1"
+    )  # /api/v1/fhir/Subscription
 
     return app
 
