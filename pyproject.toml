@@ -52,6 +52,8 @@ module = [
   "domain.services.vitals_orchestrator",
   "infrastructure.adapters.hl7v2_adapter",
   "infrastructure.streaming.mllp_listener",
+  "infrastructure.streaming.subscription_dispatcher",
+  "api.v1.fhir_subscription",
 ]
 disable_error_code = ["attr-defined"]
 

@@ -302,12 +302,19 @@ async def ingest_vitals(
         headers["X-NEWS2-Total"] = str(analysis_result.news2_score.total)
         headers["X-NEWS2-Risk-Level"] = analysis_result.news2_score.risk_level.value
 
-    # Phase 5 Section A: live dashboard delta push. getattr-guarded rather
-    # than a hard app.state access — the channel is always set by main.py's
-    # lifespan in production, but some test fixtures build a bare app.
+    # Phase 5 Section A: live dashboard delta push + FHIR Subscription
+    # dispatch. getattr-guarded rather than a hard app.state access — both
+    # are always set by main.py's lifespan in production, but some test
+    # fixtures build a bare app.
     live_channel = getattr(request.app.state, "live_dashboard_channel", None)
     if live_channel is not None:
         await live_channel.broadcast(bundle, source="http-vitals")
+
+    subscription_dispatcher = getattr(
+        request.app.state, "subscription_dispatcher", None
+    )
+    if subscription_dispatcher is not None:
+        await subscription_dispatcher.dispatch(bundle)
 
     return JSONResponse(
         content=bundle,
