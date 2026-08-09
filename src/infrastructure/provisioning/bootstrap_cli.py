@@ -27,6 +27,7 @@ from config import (
     get_device_common_name,
     get_enrollment_token,
     get_provisioning_bootstrap_url,
+    get_provisioning_ca_bundle_path,
     get_provisioning_enabled,
     get_provisioning_max_enroll_attempts,
 )
@@ -49,6 +50,7 @@ async def _main() -> int:
         cert_store = CertStore(get_cert_store_path())
         max_attempts = get_provisioning_max_enroll_attempts()
         device_common_name = get_device_common_name()
+        ca_bundle_path = get_provisioning_ca_bundle_path()
     except ValueError:
         _log.exception("provisioning.bootstrap_cli.configuration_error")
         return 1
@@ -60,6 +62,7 @@ async def _main() -> int:
             enrollment_token=enrollment_token,
             device_common_name=device_common_name,
             max_attempts=max_attempts,
+            ca_bundle_path=ca_bundle_path,
         )
     except EnrollmentError:
         _log.exception("provisioning.bootstrap_cli.enrollment_failed")

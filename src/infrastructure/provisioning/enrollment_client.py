@@ -55,12 +55,31 @@ POST /api/v1/fhir/Subscription was scrutinized):
   in url_safety.py's docstring. Flagged for human review: the control
   plane implementation (wherever it lives) must independently rate-limit
   per-token and per-source-IP attempts.
+
+  UPDATE (server-authentication leg -- narrows, does NOT close, this
+  hazard; still PROPOSED, pending human sign-off): the handshake described
+  above was originally server-authenticated against the OS/system default
+  CA trust store, not the control plane's own CA specifically -- meaning
+  ANY publicly-trusted certificate, not just the real control plane's,
+  would be accepted. `ca_bundle_path` (see __init__, wired from
+  config.get_provisioning_ca_bundle_path(), itself fail-closed) now pins
+  TLS trust to the control plane's specific CA bundle instead, closing
+  that specific gap. `expected_hostname`, when supplied from a source
+  independent of `bootstrap_url` itself, additionally guards against a
+  tampered/misconfigured bootstrap_url pointing at an unexpected host
+  while still naming a hostname that CA pinning alone wouldn't catch (CA
+  pinning proves "this cert is trusted by the control plane's CA", not
+  "bootstrap_url is the host we meant to configure"). Standard TLS
+  hostname/SAN verification against the pinned CA happens automatically
+  once `verify=` points at a real CA bundle -- that part requires no
+  additional code here.
 """
 
 from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass
+from urllib.parse import urlparse
 
 import httpx
 import structlog
@@ -132,15 +151,41 @@ class DeviceEnrollmentClient:
         bootstrap_url: str,
         *,
         http_client: httpx.AsyncClient | None = None,
+        ca_bundle_path: str | None = None,
+        expected_hostname: str | None = None,
         max_attempts: int = 5,
         base_backoff_seconds: float = _DEFAULT_BASE_BACKOFF_SECONDS,
         max_backoff_seconds: float = _DEFAULT_MAX_BACKOFF_SECONDS,
     ) -> None:
+        """
+        `ca_bundle_path` and `expected_hostname` are ignored when
+        `http_client` is injected (tests own their own transport) -- they
+        only affect the httpx.AsyncClient this constructor builds itself.
+
+        `expected_hostname`, if given, MUST come from a source independent
+        of `bootstrap_url` (e.g. a separate pinned config value) -- passing
+        `urlparse(bootstrap_url).hostname` back in here is a no-op check
+        that proves nothing, since it will always match itself.
+        """
         if max_attempts < 1:
             raise ValueError(f"max_attempts must be >= 1. Got {max_attempts}.")
         self._bootstrap_url = bootstrap_url.rstrip("/")
+
+        if expected_hostname is not None:
+            actual_hostname = urlparse(self._bootstrap_url).hostname
+            if actual_hostname != expected_hostname:
+                raise ValueError(
+                    "bootstrap_url hostname "
+                    f"{actual_hostname!r} does not match the independently "
+                    f"pinned control-plane hostname {expected_hostname!r} "
+                    "(HAZARD-STREAM-010 server-authentication check) -- "
+                    "refusing to construct an enrollment client rather than "
+                    "connect to an unexpected host."
+                )
+
         self._client = http_client or httpx.AsyncClient(
-            timeout=_DEFAULT_REQUEST_TIMEOUT_SECONDS
+            timeout=_DEFAULT_REQUEST_TIMEOUT_SECONDS,
+            verify=ca_bundle_path if ca_bundle_path else True,
         )
         self._owns_client = http_client is None
         self._max_attempts = max_attempts
