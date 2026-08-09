@@ -61,6 +61,7 @@ from domain.services.vitals_orchestrator import VitalsOrchestrator
 
 from infrastructure.adapters.hl7v2_adapter import HL7v2Adapter
 from infrastructure.fhir.bundle_assembler import BundleAssembler
+from infrastructure.streaming.live_dashboard_channel import LiveDashboardChannel
 from infrastructure.streaming.ring_buffer import StoreAndForwardRingBuffer
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
@@ -113,6 +114,7 @@ class MLLPListener:
         assembler: BundleAssembler | None = None,
         default_spo2_scale: SpO2Scale = SpO2Scale.SCALE_1,
         max_frame_bytes: int = _DEFAULT_MAX_FRAME_BYTES,
+        live_channel: LiveDashboardChannel | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -125,6 +127,10 @@ class MLLPListener:
         self._assembler = assembler or BundleAssembler()
         self._default_spo2_scale = default_spo2_scale
         self._max_frame_bytes = max_frame_bytes
+        # Optional: Phase 5 Section A live dashboard fan-out. None is a
+        # fully supported configuration (MLLP ingestion has no dependency
+        # on a dashboard being present) -- see _process_frame().
+        self._live_channel = live_channel
         self._server: asyncio.Server | None = None
 
     @property
@@ -266,6 +272,10 @@ class MLLPListener:
         dropped = self._forward_buffer.push(bundle)
         if dropped:
             log.warning("mllp_listener.forward_buffer.overflow_drop")
+
+        if self._live_channel is not None:
+            # Fire-and-forget: never adds latency to the ACK/NAK response.
+            self._live_channel.schedule_broadcast(bundle, source="mllp")
 
         log.info(
             "mllp_listener.frame.processed",

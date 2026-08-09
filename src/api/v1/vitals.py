@@ -25,7 +25,7 @@ from domain.entities.vital_sign import (
     VitalSignUnit,
 )
 from domain.services.vitals_orchestrator import VitalsOrchestrator
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 from infrastructure.fhir.bundle_assembler import BundleAssembler
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -215,6 +215,7 @@ class VitalsIngestionRequest(BaseModel):
 )
 async def ingest_vitals(
     payload: VitalsIngestionRequest,
+    request: Request,
 ) -> JSONResponse:
     """
     Full DSP → NEWS2 → FHIR pipeline from structured JSON input.
@@ -300,6 +301,13 @@ async def ingest_vitals(
     if analysis_result.news2_score is not None:
         headers["X-NEWS2-Total"] = str(analysis_result.news2_score.total)
         headers["X-NEWS2-Risk-Level"] = analysis_result.news2_score.risk_level.value
+
+    # Phase 5 Section A: live dashboard delta push. getattr-guarded rather
+    # than a hard app.state access — the channel is always set by main.py's
+    # lifespan in production, but some test fixtures build a bare app.
+    live_channel = getattr(request.app.state, "live_dashboard_channel", None)
+    if live_channel is not None:
+        await live_channel.broadcast(bundle, source="http-vitals")
 
     return JSONResponse(
         content=bundle,

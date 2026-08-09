@@ -16,6 +16,7 @@ import structlog
 import uvicorn
 from api.v1.health import router as health_router
 from api.v1.ingest import router as ingest_router
+from api.v1.live import router as live_router
 from api.v1.vitals import router as vitals_router
 from config import (
     get_cors_allowed_origins,
@@ -28,6 +29,7 @@ from config import (
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from infrastructure.streaming.live_dashboard_channel import LiveDashboardChannel
 from infrastructure.streaming.mllp_listener import MLLPListener
 from infrastructure.streaming.mqtt_publisher import MQTTPublisher
 from infrastructure.streaming.ring_buffer import StoreAndForwardRingBuffer
@@ -57,11 +59,19 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     broker. The buffer is created unconditionally (cheap, in-memory) so
     either component can be enabled independently. Disabled by default.
     See infrastructure/streaming/mqtt_publisher.py.
+
+    A LiveDashboardChannel is always created (cheap, in-memory, no
+    connection to manage until a dashboard client actually connects) so
+    WS /api/v1/live/vitals is available regardless of MLLP/MQTT config.
+    Every ingestion path (MLLP, POST /api/v1/ingest, POST /api/v1/vitals)
+    pushes a delta through it. See
+    infrastructure/streaming/live_dashboard_channel.py.
     """
     app.state.start_time = time.monotonic()
     app.state.forward_buffer = StoreAndForwardRingBuffer(
         capacity=_FORWARD_BUFFER_CAPACITY
     )
+    app.state.live_dashboard_channel = LiveDashboardChannel()
     app.state.mllp_listener = None
     app.state.mqtt_publisher = None
 
@@ -70,6 +80,7 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
             host=get_mllp_host(),
             port=get_mllp_port(),
             forward_buffer=app.state.forward_buffer,
+            live_channel=app.state.live_dashboard_channel,
         )
         await listener.start()
         app.state.mllp_listener = listener
@@ -209,6 +220,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)  # GET  /health
     app.include_router(ingest_router, prefix="/api/v1")  # POST /api/v1/ingest
     app.include_router(vitals_router, prefix="/api/v1")  # POST /api/v1/vitals
+    app.include_router(live_router, prefix="/api/v1")  # WS   /api/v1/live/vitals
 
     return app
 

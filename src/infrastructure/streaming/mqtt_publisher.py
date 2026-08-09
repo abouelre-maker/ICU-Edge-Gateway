@@ -66,6 +66,7 @@ from typing import Any
 import paho.mqtt.client as mqtt
 import structlog
 
+from infrastructure.streaming.fhir_bundle_utils import extract_patient_id
 from infrastructure.streaming.ring_buffer import StoreAndForwardRingBuffer
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
@@ -75,23 +76,10 @@ _DEFAULT_PUBLISH_TIMEOUT_SECONDS = 10.0
 _DEFAULT_MIN_RECONNECT_DELAY_SECONDS = 1
 _DEFAULT_MAX_RECONNECT_DELAY_SECONDS = 60
 
-
-def _extract_patient_id(bundle: dict[str, Any]) -> str:
-    """
-    Best-effort extraction of the FHIR Patient logical ID from a Bundle, for
-    MQTT topic routing. Every Observation entry carries
-    `subject: {"reference": "Patient/{id}"}` (see observation_builder.py) —
-    the first one found is authoritative, since all entries in one Bundle
-    share the same subject. Falls back to "UNKNOWN" for an empty/malformed
-    Bundle rather than raising — a publish/topic-routing failure must never
-    be allowed to drop telemetry that already passed the domain pipeline.
-    """
-    for entry in bundle.get("entry", []):
-        resource = entry.get("resource", {})
-        reference = resource.get("subject", {}).get("reference", "")
-        if reference.startswith("Patient/"):
-            return reference.removeprefix("Patient/")
-    return "UNKNOWN"
+# Kept as a module-level alias (rather than removed outright): moved to the
+# shared infrastructure/streaming/fhir_bundle_utils.py module so
+# LiveDashboardChannel can reuse the same logic instead of duplicating it.
+_extract_patient_id = extract_patient_id
 
 
 class MQTTPublisher:
