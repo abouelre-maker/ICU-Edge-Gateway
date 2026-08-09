@@ -11,12 +11,19 @@ from __future__ import annotations
 
 import pytest
 from config import (
+    get_cert_store_path,
     get_cors_allowed_origins,
+    get_device_common_name,
+    get_enrollment_token,
     get_mllp_enabled,
     get_mllp_host,
     get_mllp_port,
     get_mqtt_config,
     get_mqtt_enabled,
+    get_provisioning_bootstrap_url,
+    get_provisioning_enabled,
+    get_provisioning_max_enroll_attempts,
+    get_reattestation_interval_seconds,
 )
 
 
@@ -279,3 +286,125 @@ class TestGetMqttConfig:
         self._clear_mqtt_env(monkeypatch)
         monkeypatch.setenv("MQTT_USERNAME", "")
         assert get_mqtt_config().username is None
+
+
+class TestGetProvisioningEnabled:
+    """Phase 5 Section B: device enrollment is opt-in, disabled by default."""
+
+    def test_disabled_by_default_when_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("PROVISIONING_ENABLED", raising=False)
+        assert get_provisioning_enabled() is False
+
+    @pytest.mark.parametrize("value", ["true", "True", "1", "yes"])
+    def test_truthy_values_enable(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        monkeypatch.setenv("PROVISIONING_ENABLED", value)
+        assert get_provisioning_enabled() is True
+
+
+class TestGetProvisioningBootstrapUrl:
+    def test_rejects_unset(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PROVISIONING_BOOTSTRAP_URL", raising=False)
+        with pytest.raises(ValueError, match="must be set"):
+            get_provisioning_bootstrap_url()
+
+    def test_rejects_non_https(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROVISIONING_BOOTSTRAP_URL", "http://control-plane.example.org")
+        with pytest.raises(ValueError, match="https://"):
+            get_provisioning_bootstrap_url()
+
+    def test_accepts_and_strips_trailing_slash(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(
+            "PROVISIONING_BOOTSTRAP_URL", "https://control-plane.example.org/"
+        )
+        assert get_provisioning_bootstrap_url() == "https://control-plane.example.org"
+
+
+class TestGetEnrollmentToken:
+    def test_rejects_when_neither_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("ENROLLMENT_TOKEN_FILE", raising=False)
+        monkeypatch.delenv("ENROLLMENT_TOKEN", raising=False)
+        with pytest.raises(ValueError, match="ENROLLMENT_TOKEN"):
+            get_enrollment_token()
+
+    def test_reads_from_env_var_directly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("ENROLLMENT_TOKEN_FILE", raising=False)
+        monkeypatch.setenv("ENROLLMENT_TOKEN", "dev-only-token")
+        assert get_enrollment_token() == "dev-only-token"
+
+    def test_prefers_token_file_over_env_var(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        token_file = tmp_path / "token"
+        token_file.write_text("file-token\n")
+        monkeypatch.setenv("ENROLLMENT_TOKEN_FILE", str(token_file))
+        monkeypatch.setenv("ENROLLMENT_TOKEN", "env-token-should-be-ignored")
+        assert get_enrollment_token() == "file-token"
+
+    def test_rejects_missing_token_file(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("ENROLLMENT_TOKEN_FILE", "/does/not/exist")
+        with pytest.raises(ValueError, match="could not be read"):
+            get_enrollment_token()
+
+    def test_rejects_empty_token_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path
+    ) -> None:
+        token_file = tmp_path / "token"
+        token_file.write_text("   \n")
+        monkeypatch.setenv("ENROLLMENT_TOKEN_FILE", str(token_file))
+        with pytest.raises(ValueError, match="is empty"):
+            get_enrollment_token()
+
+
+class TestGetDeviceCommonName:
+    def test_uses_explicit_value_when_set(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("DEVICE_COMMON_NAME", "edge-device-042")
+        assert get_device_common_name() == "edge-device-042"
+
+    def test_falls_back_to_hostname_when_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("DEVICE_COMMON_NAME", raising=False)
+        assert get_device_common_name()  # non-empty; exact hostname is host-dependent
+
+
+class TestGetCertStorePath:
+    def test_default_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("CERT_STORE_PATH", raising=False)
+        assert get_cert_store_path() == "/var/lib/icu-edge-gateway/pki"
+
+    def test_explicit_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("CERT_STORE_PATH", "/mnt/pki")
+        assert get_cert_store_path() == "/mnt/pki"
+
+
+class TestGetProvisioningMaxEnrollAttempts:
+    def test_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("PROVISIONING_MAX_ENROLL_ATTEMPTS", raising=False)
+        assert get_provisioning_max_enroll_attempts() == 5
+
+    def test_rejects_non_integer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROVISIONING_MAX_ENROLL_ATTEMPTS", "many")
+        with pytest.raises(ValueError, match="must be an integer"):
+            get_provisioning_max_enroll_attempts()
+
+    def test_rejects_less_than_one(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("PROVISIONING_MAX_ENROLL_ATTEMPTS", "0")
+        with pytest.raises(ValueError, match=">= 1"):
+            get_provisioning_max_enroll_attempts()
+
+
+class TestGetReattestationIntervalSeconds:
+    def test_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("REATTESTATION_INTERVAL_SECONDS", raising=False)
+        assert get_reattestation_interval_seconds() == 3600
+
+    def test_rejects_non_positive(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("REATTESTATION_INTERVAL_SECONDS", "0")
+        with pytest.raises(ValueError, match="must be positive"):
+            get_reattestation_interval_seconds()

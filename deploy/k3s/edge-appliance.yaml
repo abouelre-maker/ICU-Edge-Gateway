@@ -1,0 +1,172 @@
+# =============================================================================
+# ICU Edge Gateway — K3s Edge-Appliance Deployment
+# Phase 5 Section B: zero-touch enrollment wiring.
+#
+# NOT a fully turnkey manifest for an unknown cluster -- it documents and
+# wires the trust-chain pieces this repo owns (cert volume, token secret
+# mount, opt-in provisioning env vars, non-root securityContext matching
+# the Dockerfile's UID/GID 1001). What it deliberately does NOT do:
+#   - Mint or rotate the enrollment-token Secret's VALUE. That token is a
+#     control-plane-issued, single-use, short-TTL artifact -- an operator
+#     or a separate provisioning controller populates
+#     icu-edge-enrollment-token before this Pod's first start. This
+#     manifest only declares the Secret SHAPE it expects to mount.
+#   - Implement the control plane itself (the bootstrap/enroll/reattest
+#     HTTP endpoints) -- see infrastructure/provisioning/enrollment_client.py's
+#     docstring: this repo is the device/client side of the protocol only.
+# =============================================================================
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: icu-edge-gateway-pki
+  labels:
+    app: icu-edge-gateway
+    icu-edge-gateway.provisioning.component: device-enrollment
+spec:
+  # Must persist across Pod restarts/rescheduling on the SAME node (or a
+  # storage class supporting ReadWriteOnce elsewhere) -- otherwise every
+  # restart looks like a fresh, never-enrolled device and burns another
+  # single-use enrollment token it doesn't have. Not ReadWriteMany: a
+  # device certificate is bound to exactly one appliance instance.
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 64Mi
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: icu-edge-gateway-provisioning-config
+  labels:
+    app: icu-edge-gateway
+data:
+  PROVISIONING_ENABLED: "true"
+  PROVISIONING_BOOTSTRAP_URL: "https://control-plane.example.org/provisioning"
+  # Operator-set per fleet/site to a stable hardware serial or
+  # pre-provisioned device UUID -- NOT the Pod hostname (see
+  # config.get_device_common_name()'s docstring: a rescheduled Pod gets a
+  # new hostname, which is not stable device identity).
+  DEVICE_COMMON_NAME: "CHANGE-ME-stable-device-id"
+  CERT_STORE_PATH: "/var/lib/icu-edge-gateway/pki"
+  PROVISIONING_MAX_ENROLL_ATTEMPTS: "5"
+  REATTESTATION_INTERVAL_SECONDS: "3600"
+
+---
+# SHAPE ONLY -- see header note. `stringData.token` here is a placeholder;
+# a real deployment replaces this whole Secret's value out-of-band (kubectl
+# create secret / a provisioning controller), never commits a real token to
+# a manifest checked into source control.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: icu-edge-enrollment-token
+  labels:
+    app: icu-edge-gateway
+type: Opaque
+stringData:
+  token: "REPLACE-WITH-CONTROL-PLANE-ISSUED-SINGLE-USE-TOKEN"
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: icu-edge-gateway
+  labels:
+    app: icu-edge-gateway
+spec:
+  # Exactly one replica: a device certificate identifies ONE physical edge
+  # appliance. This is not a horizontally-scaled stateless web service --
+  # see main.py's existing "single-worker uvicorn" comment, same reasoning
+  # extended to the Pod level.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: icu-edge-gateway
+  template:
+    metadata:
+      labels:
+        app: icu-edge-gateway
+    spec:
+      # Matches the Dockerfile's `addgroup -g 1001 gateway` / `adduser -u
+      # 1001 gateway` non-root user. fsGroup ensures the mounted PVC is
+      # writable by that UID/GID regardless of the storage backend's
+      # default root-owned mount behavior.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+      containers:
+        - name: icu-edge-gateway
+          image: icu-edge-gateway:1.0.0-phase5-section-b
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: icu-edge-gateway-provisioning-config
+          env:
+            # File-based (Secret volume), not a raw env var -- see
+            # config.get_enrollment_token()'s docstring: ENROLLMENT_TOKEN_FILE
+            # is preferred specifically so the token isn't visible via
+            # `kubectl describe pod` / process listings the way a plain env
+            # var would be.
+            - name: ENROLLMENT_TOKEN_FILE
+              value: /etc/icu-edge-gateway/enrollment/token
+          volumeMounts:
+            - name: pki
+              mountPath: /var/lib/icu-edge-gateway/pki
+            - name: enrollment-token
+              mountPath: /etc/icu-edge-gateway/enrollment
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # / (rootfs) is read-only (above) -- these are the only two
+          # directories this container writes to at runtime.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            # Generous initial delay: entrypoint.sh's enrollment handshake
+            # (bounded retries with backoff, PROVISIONING_MAX_ENROLL_ATTEMPTS)
+            # must complete before uvicorn even starts listening -- a probe
+            # that fires before that finishes would kill a Pod that is
+            # correctly, if slowly, still enrolling.
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: pki
+          persistentVolumeClaim:
+            claimName: icu-edge-gateway-pki
+        - name: enrollment-token
+          secret:
+            secretName: icu-edge-enrollment-token
+            items:
+              - key: token
+                path: token
+                mode: 0400

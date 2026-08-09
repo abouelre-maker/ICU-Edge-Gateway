@@ -17,21 +17,68 @@ FDA CDS Non-Device Exemption: every delivered Bundle carries the same
 X-CDS-Advisory-Only marker as the REST ingestion responses (added in
 subscription_dispatcher.py's delivery headers) — Subscription delivery is
 a transport, not a new clinical output.
+
+ISO 14971 HAZARD-STREAM-009 (PROPOSED — pending human security/risk-
+management sign-off; see config.get_fhir_subscription_registration_secret's
+docstring for the full hazard analysis): every route in this router
+requires a pre-shared secret via "Authorization: Bearer <secret>"
+(FHIR_SUBSCRIPTION_REGISTRATION_SECRET). Without it, any network-reachable
+caller could register a Subscription to exfiltrate clinical Bundles, or
+read/delete another caller's Subscription -- including the channel.header
+webhook credentials embedded in it. This is enforced as a router-level
+dependency, not per-route, so a new route added to this file is
+authenticated by default rather than by remembering to opt in.
 """
 
 from __future__ import annotations
 
+import secrets as _secrets
 from typing import Any
 
 import structlog
-from fastapi import APIRouter, HTTPException, Request, status
+from config import get_fhir_subscription_registration_secret
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from infrastructure.fhir.subscription import create_subscription_from_fhir_request
 from infrastructure.streaming.subscription_registry import SubscriptionRegistry
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
-router = APIRouter(tags=["FHIR Subscription"])
+
+def _require_registration_secret(request: Request) -> None:
+    """
+    FastAPI dependency: reject the request unless it presents the correct
+    FHIR_SUBSCRIPTION_REGISTRATION_SECRET as "Authorization: Bearer <secret>".
+
+    HAZARD-STREAM-009 mitigation (see module docstring). Uses
+    secrets.compare_digest for a constant-time comparison so response
+    timing cannot be used to guess the secret. A missing/misconfigured
+    secret on the server side is a 503 (ops problem, fail-closed like
+    CORS's wildcard refusal) -- distinct from a 401 (caller problem).
+    """
+    try:
+        expected = get_fhir_subscription_registration_secret()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=str(exc),
+        ) from exc
+
+    scheme, _, presented = request.headers.get("Authorization", "").partition(" ")
+    if scheme.lower() != "bearer" or not presented or not _secrets.compare_digest(
+        presented, expected
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid Subscription registration credentials.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+router = APIRouter(
+    tags=["FHIR Subscription"],
+    dependencies=[Depends(_require_registration_secret)],
+)
 
 
 def _registry(request: Request) -> SubscriptionRegistry:
@@ -61,6 +108,7 @@ def _registry(request: Request) -> SubscriptionRegistry:
         201: {
             "description": "FHIR R4 Subscription (application/fhir+json), status=active."
         },
+        401: {"description": "Missing or invalid registration credentials."},
         422: {"description": "Unsupported criteria, channel type, or unsafe endpoint."},
     },
 )
@@ -87,6 +135,7 @@ async def create_subscription(request: Request) -> JSONResponse:
     summary="Read a FHIR R4 Subscription",
     responses={
         200: {"description": "FHIR R4 Subscription (application/fhir+json)."},
+        401: {"description": "Missing or invalid registration credentials."},
         404: {"description": "No Subscription with this id."},
     },
 )
@@ -111,6 +160,10 @@ async def read_subscription(subscription_id: str, request: Request) -> JSONRespo
         "returns the full set (single-tenant appliance assumption; see "
         "infrastructure/fhir/subscription.py HAZARD-FHIR-004)."
     ),
+    responses={
+        200: {"description": "FHIR R4 searchset Bundle."},
+        401: {"description": "Missing or invalid registration credentials."},
+    },
 )
 async def list_subscriptions(request: Request) -> JSONResponse:
     subscriptions = _registry(request).list_all()
@@ -129,6 +182,7 @@ async def list_subscriptions(request: Request) -> JSONResponse:
     summary="Cancel a FHIR R4 Subscription",
     responses={
         204: {"description": "Subscription deleted."},
+        401: {"description": "Missing or invalid registration credentials."},
         404: {"description": "No Subscription with this id."},
     },
 )

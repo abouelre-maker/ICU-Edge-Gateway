@@ -25,6 +25,20 @@ from httpx import AsyncClient
 from main import create_app
 from starlette.testclient import TestClient
 
+# HAZARD-STREAM-009: every route in api/v1/fhir_subscription.py requires
+# this pre-shared secret. Set for every test in this module so existing
+# behavior (create/read/list/delete) is exercised past the auth gate --
+# the auth gate itself is covered separately below by
+# TestRegistrationAuthentication, which deliberately omits/breaks it.
+_TEST_SECRET = "test-only-registration-secret-do-not-use-in-prod"
+_AUTH_HEADERS = {"Authorization": f"Bearer {_TEST_SECRET}"}
+
+
+@pytest.fixture(autouse=True)
+def _registration_secret(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("FHIR_SUBSCRIPTION_REGISTRATION_SECRET", _TEST_SECRET)
+
+
 _VALID_PAYLOAD = {
     "resourceType": "Subscription",
     "criteria": "Bundle",
@@ -70,7 +84,9 @@ class TestRegistryMissingFallback:
     async def test_returns_503_when_registry_not_initialized(
         self, client: AsyncClient
     ) -> None:
-        response = await client.post("/api/v1/fhir/Subscription", json=_VALID_PAYLOAD)
+        response = await client.post(
+            "/api/v1/fhir/Subscription", json=_VALID_PAYLOAD, headers=_AUTH_HEADERS
+        )
         assert response.status_code == 503
 
 
@@ -78,7 +94,9 @@ class TestRegistryMissingFallback:
 class TestCreateSubscriptionEndpoint:
     def test_returns_201_and_fhir_shape(self) -> None:
         with TestClient(create_app()) as client:
-            response = client.post("/api/v1/fhir/Subscription", json=_VALID_PAYLOAD)
+            response = client.post(
+                "/api/v1/fhir/Subscription", json=_VALID_PAYLOAD, headers=_AUTH_HEADERS
+            )
             assert response.status_code == 201
             body = response.json()
             assert body["resourceType"] == "Subscription"
@@ -89,7 +107,9 @@ class TestCreateSubscriptionEndpoint:
     def test_invalid_criteria_returns_422(self) -> None:
         with TestClient(create_app()) as client:
             payload = {**_VALID_PAYLOAD, "criteria": "Observation?code=1975-2"}
-            response = client.post("/api/v1/fhir/Subscription", json=payload)
+            response = client.post(
+                "/api/v1/fhir/Subscription", json=payload, headers=_AUTH_HEADERS
+            )
             assert response.status_code == 422
             assert "Unsupported Subscription.criteria" in response.json()["detail"]
 
@@ -102,7 +122,9 @@ class TestCreateSubscriptionEndpoint:
                     "endpoint": "https://127.0.0.1/hook",
                 },
             }
-            response = client.post("/api/v1/fhir/Subscription", json=payload)
+            response = client.post(
+                "/api/v1/fhir/Subscription", json=payload, headers=_AUTH_HEADERS
+            )
             assert response.status_code == 422
 
     def test_unimplemented_channel_type_returns_422(self) -> None:
@@ -111,7 +133,9 @@ class TestCreateSubscriptionEndpoint:
                 **_VALID_PAYLOAD,
                 "channel": {**_VALID_PAYLOAD["channel"], "type": "websocket"},
             }
-            response = client.post("/api/v1/fhir/Subscription", json=payload)
+            response = client.post(
+                "/api/v1/fhir/Subscription", json=payload, headers=_AUTH_HEADERS
+            )
             assert response.status_code == 422
             assert "NOT IMPLEMENTED" in response.json()["detail"]
 
@@ -121,23 +145,31 @@ class TestReadAndListSubscriptionEndpoints:
     def test_read_after_create_round_trips(self) -> None:
         with TestClient(create_app()) as client:
             created = client.post(
-                "/api/v1/fhir/Subscription", json=_VALID_PAYLOAD
+                "/api/v1/fhir/Subscription", json=_VALID_PAYLOAD, headers=_AUTH_HEADERS
             ).json()
-            response = client.get(f"/api/v1/fhir/Subscription/{created['id']}")
+            response = client.get(
+                f"/api/v1/fhir/Subscription/{created['id']}", headers=_AUTH_HEADERS
+            )
             assert response.status_code == 200
             assert response.json()["id"] == created["id"]
 
     def test_read_unknown_id_returns_404(self) -> None:
         with TestClient(create_app()) as client:
-            response = client.get("/api/v1/fhir/Subscription/does-not-exist")
+            response = client.get(
+                "/api/v1/fhir/Subscription/does-not-exist", headers=_AUTH_HEADERS
+            )
             assert response.status_code == 404
 
     def test_list_returns_searchset_bundle(self) -> None:
         with TestClient(create_app()) as client:
-            client.post("/api/v1/fhir/Subscription", json=_VALID_PAYLOAD)
-            client.post("/api/v1/fhir/Subscription", json=_VALID_PAYLOAD)
+            client.post(
+                "/api/v1/fhir/Subscription", json=_VALID_PAYLOAD, headers=_AUTH_HEADERS
+            )
+            client.post(
+                "/api/v1/fhir/Subscription", json=_VALID_PAYLOAD, headers=_AUTH_HEADERS
+            )
 
-            response = client.get("/api/v1/fhir/Subscription")
+            response = client.get("/api/v1/fhir/Subscription", headers=_AUTH_HEADERS)
             assert response.status_code == 200
             body = response.json()
             assert body["resourceType"] == "Bundle"
@@ -151,18 +183,99 @@ class TestDeleteSubscriptionEndpoint:
     def test_delete_existing_returns_204(self) -> None:
         with TestClient(create_app()) as client:
             created = client.post(
-                "/api/v1/fhir/Subscription", json=_VALID_PAYLOAD
+                "/api/v1/fhir/Subscription", json=_VALID_PAYLOAD, headers=_AUTH_HEADERS
             ).json()
-            response = client.delete(f"/api/v1/fhir/Subscription/{created['id']}")
+            response = client.delete(
+                f"/api/v1/fhir/Subscription/{created['id']}", headers=_AUTH_HEADERS
+            )
             assert response.status_code == 204
 
-            follow_up = client.get(f"/api/v1/fhir/Subscription/{created['id']}")
+            follow_up = client.get(
+                f"/api/v1/fhir/Subscription/{created['id']}", headers=_AUTH_HEADERS
+            )
             assert follow_up.status_code == 404
 
     def test_delete_unknown_id_returns_404(self) -> None:
         with TestClient(create_app()) as client:
-            response = client.delete("/api/v1/fhir/Subscription/does-not-exist")
+            response = client.delete(
+                "/api/v1/fhir/Subscription/does-not-exist", headers=_AUTH_HEADERS
+            )
             assert response.status_code == 404
+
+
+@pytest.mark.integration
+class TestRegistrationAuthentication:
+    """
+    HAZARD-STREAM-009: POST/GET/DELETE /api/v1/fhir/Subscription accept and
+    disclose caller-supplied webhook credentials (channel.header) and must
+    not be reachable without a correct pre-shared registration secret.
+    These tests deliberately do NOT rely on the module-level
+    `_registration_secret` autouse fixture's header being attached, so they
+    exercise the actual rejection path rather than assuming it works.
+    """
+
+    def test_unauthenticated_create_is_rejected(self) -> None:
+        with TestClient(create_app()) as client:
+            response = client.post("/api/v1/fhir/Subscription", json=_VALID_PAYLOAD)
+            assert response.status_code == 401
+            assert response.headers["WWW-Authenticate"] == "Bearer"
+
+    def test_wrong_secret_create_is_rejected(self) -> None:
+        with TestClient(create_app()) as client:
+            response = client.post(
+                "/api/v1/fhir/Subscription",
+                json=_VALID_PAYLOAD,
+                headers={"Authorization": "Bearer not-the-right-secret"},
+            )
+            assert response.status_code == 401
+
+    def test_malformed_authorization_scheme_is_rejected(self) -> None:
+        with TestClient(create_app()) as client:
+            response = client.post(
+                "/api/v1/fhir/Subscription",
+                json=_VALID_PAYLOAD,
+                headers={"Authorization": f"Basic {_TEST_SECRET}"},
+            )
+            assert response.status_code == 401
+
+    def test_unauthenticated_read_is_rejected(self) -> None:
+        with TestClient(create_app()) as client:
+            created = client.post(
+                "/api/v1/fhir/Subscription", json=_VALID_PAYLOAD, headers=_AUTH_HEADERS
+            ).json()
+            response = client.get(f"/api/v1/fhir/Subscription/{created['id']}")
+            assert response.status_code == 401
+
+    def test_unauthenticated_list_is_rejected(self) -> None:
+        with TestClient(create_app()) as client:
+            response = client.get("/api/v1/fhir/Subscription")
+            assert response.status_code == 401
+
+    def test_unauthenticated_delete_is_rejected(self) -> None:
+        with TestClient(create_app()) as client:
+            created = client.post(
+                "/api/v1/fhir/Subscription", json=_VALID_PAYLOAD, headers=_AUTH_HEADERS
+            ).json()
+            response = client.delete(f"/api/v1/fhir/Subscription/{created['id']}")
+            assert response.status_code == 401
+            # And it genuinely was NOT deleted -- reachable with the secret.
+            follow_up = client.get(
+                f"/api/v1/fhir/Subscription/{created['id']}", headers=_AUTH_HEADERS
+            )
+            assert follow_up.status_code == 200
+
+    def test_missing_server_side_secret_returns_503_not_401(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Overrides this module's autouse fixture: proves the fail-closed
+        # ops-misconfiguration path (503) is distinct from a caller-side
+        # auth failure (401), even when the caller presents *some* token.
+        monkeypatch.delenv("FHIR_SUBSCRIPTION_REGISTRATION_SECRET", raising=False)
+        with TestClient(create_app()) as client:
+            response = client.post(
+                "/api/v1/fhir/Subscription", json=_VALID_PAYLOAD, headers=_AUTH_HEADERS
+            )
+            assert response.status_code == 503
 
 
 @pytest.mark.integration
@@ -195,6 +308,7 @@ class TestSubscriptionEndToEndDelivery:
                     **_VALID_PAYLOAD,
                     "criteria": "Bundle?patient=Patient/PT-SUB-001",
                 },
+                headers=_AUTH_HEADERS,
             )
             assert create_resp.status_code == 201
 
@@ -227,6 +341,7 @@ class TestSubscriptionEndToEndDelivery:
                     **_VALID_PAYLOAD,
                     "criteria": "Bundle?patient=Patient/SOME-OTHER-PATIENT",
                 },
+                headers=_AUTH_HEADERS,
             )
             client.post(
                 "/api/v1/ingest",
