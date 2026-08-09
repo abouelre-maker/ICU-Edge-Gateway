@@ -1,0 +1,7 @@
+# Mock control plane — local dev only. Deliberately unpinned to the exact
+# SOUP-tracked versions in the main project's requirements.txt (this is not
+# shipped/regulated code) but kept to the same major lines for consistency.
+fastapi>=0.110,<1.0
+uvicorn[standard]>=0.29,<1.0
+cryptography>=44.0,<51.0
+pydantic>=2.0,<3.0
