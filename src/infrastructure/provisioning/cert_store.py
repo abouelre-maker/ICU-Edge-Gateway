@@ -27,16 +27,31 @@ management sign-off; new hazard for new code):
       quarantine() below is called to make the device certificate
       unusable, forcing a fresh enrollment (with a fresh single-use token
       -- a revoked device cannot silently re-provision itself with the
-      same trust).
+      same trust). UPDATE: this interval check is now actually SCHEDULED
+      -- see infrastructure/provisioning/reattestation.py's
+      reattestation_loop(), started as a background task in main.py's
+      ASGI lifespan when PROVISIONING_ENABLED=true. Previously reattest()
+      was implemented but never called from anywhere in this codebase;
+      that gap is now closed. The hazard itself remains PROPOSED (not
+      self-closed) -- this update narrows it, it does not resolve it; the
+      two gaps below are unchanged by this update.
   NOT implemented here: CRL/OCSP checking against the control plane's CA.
-  Re-attestation is the sole revocation signal in this pass -- a device
-  that is revoked but network-partitioned from the control plane (so it
-  can never attempt a re-attestation call) is NOT mitigated by this design
-  and keeps operating on its last-known-valid certificate until it expires
-  naturally. Flagged for human review: a deployment with a stronger
-  fail-closed requirement (e.g. "stop operating if re-attestation has not
-  succeeded in N hours, even without an explicit revocation signal") is
-  not implemented in this pass.
+  Re-attestation is the sole revocation signal in this pass, and two gaps
+  remain even now that it is actually scheduled:
+    - Mid-session gap: an already-open mTLS connection/session is not torn
+      down when a revocation is discovered -- only the NEXT reattest()
+      tick acts on it. A device revoked between ticks keeps whatever
+      session it already has open until that session ends on its own.
+    - Network-partition gap: a device that is revoked but
+      network-partitioned from the control plane (so it can never
+      complete a reattest() call) is NOT mitigated by this design and
+      keeps operating on its last-known-valid certificate until it
+      expires naturally.
+  Flagged for human review: a deployment with a stronger fail-closed
+  requirement (e.g. "stop operating if re-attestation has not succeeded in
+  N hours, even without an explicit revocation signal", or "terminate open
+  sessions immediately on a revoked reattest() result") is not implemented
+  in this pass.
 """
 
 from __future__ import annotations
