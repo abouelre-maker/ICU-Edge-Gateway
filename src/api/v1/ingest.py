@@ -204,12 +204,19 @@ async def ingest_hl7(
         duration_ms=round(analysis_result.processing_duration_ms, 2),
     )
 
-    # Phase 5 Section A: live dashboard delta push. getattr-guarded rather
-    # than a hard app.state access — the channel is always set by main.py's
-    # lifespan in production, but some test fixtures build a bare app.
+    # Phase 5 Section A: live dashboard delta push + FHIR Subscription
+    # dispatch. getattr-guarded rather than a hard app.state access — both
+    # are always set by main.py's lifespan in production, but some test
+    # fixtures build a bare app.
     live_channel = getattr(request.app.state, "live_dashboard_channel", None)
     if live_channel is not None:
         await live_channel.broadcast(bundle, source="http-ingest")
+
+    subscription_dispatcher = getattr(
+        request.app.state, "subscription_dispatcher", None
+    )
+    if subscription_dispatcher is not None:
+        await subscription_dispatcher.dispatch(bundle)
 
     return JSONResponse(
         content=bundle,
