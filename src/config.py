@@ -258,6 +258,36 @@ def get_enrollment_token() -> str:
     return env_token.strip()
 
 
+def get_provisioning_ca_bundle_path() -> str:
+    """
+    PROVISIONING_CA_BUNDLE_PATH (required when PROVISIONING_ENABLED=true).
+
+    Path to a PEM file containing ONLY the control plane's specific CA
+    certificate(s) -- NOT the system/OS default trust store.
+
+    ISO 14971 HAZARD-STREAM-010 (server-authentication leg -- narrows, does
+    not close, the existing PROPOSED hazard; see enrollment_client.py):
+    without this, DeviceEnrollmentClient trusts any certificate chaining to
+    ANY publicly-trusted CA, not specifically the real control plane's. A
+    device tricked (DNS hijack, compromised resolver, malicious network at
+    a physical deployment site) into resolving PROVISIONING_BOOTSTRAP_URL's
+    hostname to an attacker-controlled host holding any publicly-trusted
+    cert would hand over its enrollment token and CSR to that host. Pinning
+    to this specific bundle closes that gap for the enrollment/reattest
+    legs. Fail-closed: raises if unset rather than silently falling back to
+    the system bundle -- an operator who forgets to set this must not get a
+    device that silently trusts the whole public CA ecosystem instead.
+    """
+    path = os.getenv("PROVISIONING_CA_BUNDLE_PATH")
+    if not path or not path.strip():
+        raise ValueError(
+            "PROVISIONING_CA_BUNDLE_PATH must be set when PROVISIONING_ENABLED "
+            "is true -- the device must not trust the system default CA bundle "
+            "for the enrollment/reattest handshakes (HAZARD-STREAM-010)."
+        )
+    return path.strip()
+
+
 def get_device_common_name() -> str:
     """
     DEVICE_COMMON_NAME (default: the container/pod hostname).
