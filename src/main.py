@@ -9,8 +9,9 @@ ensuring consistent audit logging and error handling for every clinical request.
 
 from __future__ import annotations
 
+import asyncio
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import structlog
 import uvicorn
@@ -20,16 +21,23 @@ from api.v1.ingest import router as ingest_router
 from api.v1.live import router as live_router
 from api.v1.vitals import router as vitals_router
 from config import (
+    get_cert_store_path,
     get_cors_allowed_origins,
     get_mllp_enabled,
     get_mllp_host,
     get_mllp_port,
     get_mqtt_config,
     get_mqtt_enabled,
+    get_provisioning_bootstrap_url,
+    get_provisioning_ca_bundle_path,
+    get_provisioning_enabled,
+    get_reattestation_interval_seconds,
 )
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from infrastructure.provisioning.cert_store import CertStore
+from infrastructure.provisioning.reattestation import reattestation_loop
 from infrastructure.streaming.live_dashboard_channel import LiveDashboardChannel
 from infrastructure.streaming.mllp_listener import MLLPListener
 from infrastructure.streaming.mqtt_publisher import MQTTPublisher
@@ -75,6 +83,14 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     MLLP/MQTT config; the dispatcher's httpx.AsyncClient is closed on
     shutdown. See infrastructure/fhir/subscription.py and
     infrastructure/streaming/subscription_dispatcher.py.
+
+    Phase 5 Section B follow-up: when PROVISIONING_ENABLED=true, a
+    background asyncio.Task runs reattestation_loop() (HAZARD-STREAM-011
+    mitigation) for the lifetime of this app -- see
+    infrastructure/provisioning/reattestation.py for why this lives in the
+    lifespan rather than bootstrap_cli.py. The task is cancelled and
+    awaited (not abandoned) on shutdown. Disabled by default, same
+    opt-in convention as MLLP/MQTT.
     """
     app.state.start_time = time.monotonic()
     app.state.forward_buffer = StoreAndForwardRingBuffer(
@@ -87,6 +103,7 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     )
     app.state.mllp_listener = None
     app.state.mqtt_publisher = None
+    app.state.reattestation_task = None
 
     if get_mllp_enabled():
         listener = MLLPListener(
@@ -127,8 +144,26 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
             broker_port=mqtt_config.broker_port,
         )
 
+    if get_provisioning_enabled():
+        app.state.reattestation_task = asyncio.create_task(
+            reattestation_loop(
+                cert_store=CertStore(get_cert_store_path()),
+                bootstrap_url=get_provisioning_bootstrap_url(),
+                interval_seconds=get_reattestation_interval_seconds(),
+                ca_bundle_path=get_provisioning_ca_bundle_path(),
+            )
+        )
+        _log.info(
+            "icu_edge_gateway.reattestation_loop.started",
+            interval_seconds=get_reattestation_interval_seconds(),
+        )
+
     _log.info("icu_edge_gateway.startup", version=app.version)
     yield
+    if app.state.reattestation_task is not None:
+        app.state.reattestation_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await app.state.reattestation_task
     if app.state.mqtt_publisher is not None:
         await app.state.mqtt_publisher.stop()
     if app.state.mllp_listener is not None:
