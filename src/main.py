@@ -17,10 +17,16 @@ import uvicorn
 from api.v1.health import router as health_router
 from api.v1.ingest import router as ingest_router
 from api.v1.vitals import router as vitals_router
-from config import get_cors_allowed_origins
+from config import (
+    get_cors_allowed_origins,
+    get_mllp_enabled,
+    get_mllp_host,
+    get_mllp_port,
+)
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from infrastructure.streaming.mllp_listener import MLLPListener
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -33,10 +39,28 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     IEC 62304 §5.8: Startup and shutdown events are timestamped and logged
     for clinical environment audit trails.
     app.state.start_time is set here — read by GET /health for uptime.
+
+    Phase 5 Section A: when MLLP_ENABLED=true, an MLLPListener is started
+    alongside the HTTP app so the edge appliance can accept HL7 v2.x
+    directly over MLLP (port 2575 by default) in addition to
+    POST /api/v1/ingest. Disabled by default — existing HTTP-only
+    deployments are unaffected. See infrastructure/streaming/mllp_listener.py.
     """
     app.state.start_time = time.monotonic()
+    app.state.mllp_listener = None
+    if get_mllp_enabled():
+        listener = MLLPListener(host=get_mllp_host(), port=get_mllp_port())
+        await listener.start()
+        app.state.mllp_listener = listener
+        _log.info(
+            "icu_edge_gateway.mllp_listener.started",
+            host=get_mllp_host(),
+            port=listener.port,
+        )
     _log.info("icu_edge_gateway.startup", version=app.version)
     yield
+    if app.state.mllp_listener is not None:
+        await app.state.mllp_listener.stop()
     uptime = round(time.monotonic() - app.state.start_time, 2)
     _log.info("icu_edge_gateway.shutdown", uptime_seconds=uptime)
 
