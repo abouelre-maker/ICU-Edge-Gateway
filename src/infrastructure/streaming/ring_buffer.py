@@ -122,3 +122,39 @@ class StoreAndForwardRingBuffer(Generic[T]):
         """Return a snapshot of all currently buffered items without removing them."""
         with self._lock:
             return list(self._items)
+
+    def requeue_front(self, items: list[T]) -> int:
+        """
+        Reinsert a batch of previously-drained items at the FRONT of the
+        buffer (oldest position), preserving their original relative order.
+
+        Used by a forwarder (e.g. the MQTT publisher) that drained a batch
+        but failed to deliver some or all of it — the undelivered items are
+        put back ahead of anything pushed in the meantime, so retries are
+        attempted in original chronological order rather than being pushed
+        to the back of the queue behind newer telemetry.
+
+        If reinserting would exceed capacity, the NEWEST items (from the
+        back of the buffer) are dropped to make room — i.e. a failed
+        delivery is prioritized for retry over brand-new data during
+        sustained backlog, the mirror image of push()'s drop-oldest policy.
+        Every such drop is counted and logged identically to push()
+        (HAZARD-STREAM-002).
+
+        Returns the number of items dropped to make room.
+        """
+        dropped = 0
+        with self._lock:
+            for item in reversed(items):
+                self._items.appendleft(item)
+            while len(self._items) > self._capacity:
+                self._items.pop()
+                self._dropped_count += 1
+                dropped += 1
+        if dropped:
+            _log.warning(
+                "store_and_forward_ring_buffer.requeue_overflow_drop",
+                capacity=self._capacity,
+                total_dropped=self.dropped_count,
+            )
+        return dropped

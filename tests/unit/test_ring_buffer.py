@@ -99,3 +99,56 @@ class TestPeekDoesNotMutate:
         buf.push(2)
         assert buf.peek_all() == [1, 2]
         assert buf.size() == 2  # unchanged after peek
+
+
+class TestRequeueFront:
+    """
+    Used by a forwarder (e.g. MQTTPublisher) that drained a batch but failed
+    to deliver some or all of it — undelivered items go back to the front
+    of the buffer, ahead of anything pushed since, so retries happen in
+    original chronological order.
+    """
+
+    def test_requeue_restores_items_ahead_of_newer_pushes(self) -> None:
+        buf: StoreAndForwardRingBuffer[int] = StoreAndForwardRingBuffer(capacity=10)
+        buf.push(1)
+        buf.push(2)
+        drained = buf.drain()  # [1, 2]
+        buf.push(3)  # pushed while [1, 2] were "in flight" to a forwarder
+
+        dropped = buf.requeue_front(drained)
+
+        assert dropped == 0
+        assert buf.peek_all() == [1, 2, 3]
+
+    def test_requeue_preserves_relative_order_of_requeued_items(self) -> None:
+        buf: StoreAndForwardRingBuffer[int] = StoreAndForwardRingBuffer(capacity=10)
+        buf.requeue_front([1, 2, 3])
+        assert buf.peek_all() == [1, 2, 3]
+
+    def test_requeue_into_empty_buffer(self) -> None:
+        buf: StoreAndForwardRingBuffer[int] = StoreAndForwardRingBuffer(capacity=10)
+        dropped = buf.requeue_front([1, 2])
+        assert dropped == 0
+        assert buf.peek_all() == [1, 2]
+
+    def test_requeue_overflow_drops_newest_not_the_requeued_items(self) -> None:
+        buf: StoreAndForwardRingBuffer[int] = StoreAndForwardRingBuffer(capacity=3)
+        buf.push(10)
+        buf.push(11)
+        buf.push(12)  # buffer now full: [10, 11, 12]
+
+        dropped = buf.requeue_front([1, 2])  # would exceed capacity by 2
+
+        assert dropped == 2
+        # The two oldest (requeued, retried) items survive; the newest
+        # regular pushes are evicted to make room for them.
+        assert buf.peek_all() == [1, 2, 10]
+        assert buf.dropped_count == 2
+
+    def test_requeue_empty_list_is_a_no_op(self) -> None:
+        buf: StoreAndForwardRingBuffer[int] = StoreAndForwardRingBuffer(capacity=5)
+        buf.push(1)
+        dropped = buf.requeue_front([])
+        assert dropped == 0
+        assert buf.peek_all() == [1]
