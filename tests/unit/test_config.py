@@ -15,6 +15,8 @@ from config import (
     get_mllp_enabled,
     get_mllp_host,
     get_mllp_port,
+    get_mqtt_config,
+    get_mqtt_enabled,
 )
 
 
@@ -166,3 +168,114 @@ class TestGetMllpPort:
     ) -> None:
         monkeypatch.setenv("MLLP_PORT", "0")
         assert get_mllp_port() == 0
+
+
+class TestGetMqttEnabled:
+    def test_disabled_by_default_when_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MQTT_ENABLED", raising=False)
+        assert get_mqtt_enabled() is False
+
+    def test_true_enables(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MQTT_ENABLED", "true")
+        assert get_mqtt_enabled() is True
+
+
+class TestGetMqttConfig:
+    """All MQTT_* env vars unset -> safe, TLS-on-by-default configuration."""
+
+    def _clear_mqtt_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        for var in (
+            "MQTT_BROKER_HOST",
+            "MQTT_BROKER_PORT",
+            "MQTT_USE_TLS",
+            "MQTT_QOS",
+            "MQTT_PUBLISH_INTERVAL_SECONDS",
+            "MQTT_DRAIN_BATCH_SIZE",
+            "MQTT_TOPIC_PREFIX",
+            "MQTT_CLIENT_ID",
+            "MQTT_USERNAME",
+            "MQTT_PASSWORD",
+        ):
+            monkeypatch.delenv(var, raising=False)
+
+    def test_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear_mqtt_env(monkeypatch)
+        cfg = get_mqtt_config()
+        assert cfg.broker_host == "localhost"
+        assert cfg.broker_port == 8883
+        assert cfg.use_tls is True
+        assert cfg.qos == 1
+        assert cfg.topic_prefix == "icu-edge/vitals"
+        assert cfg.client_id == "icu-edge-gateway"
+        assert cfg.username is None
+        assert cfg.password is None
+        assert cfg.publish_interval_seconds == 1.0
+        assert cfg.drain_batch_size == 50
+
+    def test_explicit_values_are_read(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MQTT_BROKER_HOST", "mqtt.example.org")
+        monkeypatch.setenv("MQTT_BROKER_PORT", "1883")
+        monkeypatch.setenv("MQTT_USE_TLS", "false")
+        monkeypatch.setenv("MQTT_QOS", "2")
+        monkeypatch.setenv("MQTT_TOPIC_PREFIX", "hospital-a/vitals/")
+        monkeypatch.setenv("MQTT_CLIENT_ID", "edge-appliance-07")
+        monkeypatch.setenv("MQTT_USERNAME", "edge07")
+        monkeypatch.setenv("MQTT_PASSWORD", "s3cret")
+        monkeypatch.setenv("MQTT_PUBLISH_INTERVAL_SECONDS", "2.5")
+        monkeypatch.setenv("MQTT_DRAIN_BATCH_SIZE", "10")
+
+        cfg = get_mqtt_config()
+
+        assert cfg.broker_host == "mqtt.example.org"
+        assert cfg.broker_port == 1883
+        assert cfg.use_tls is False
+        assert cfg.qos == 2
+        assert cfg.topic_prefix == "hospital-a/vitals/"
+        assert cfg.client_id == "edge-appliance-07"
+        assert cfg.username == "edge07"
+        assert cfg.password == "s3cret"
+        assert cfg.publish_interval_seconds == 2.5
+        assert cfg.drain_batch_size == 10
+
+    def test_rejects_invalid_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear_mqtt_env(monkeypatch)
+        monkeypatch.setenv("MQTT_BROKER_PORT", "not-a-port")
+        with pytest.raises(ValueError, match="must be an integer"):
+            get_mqtt_config()
+
+    def test_rejects_out_of_range_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear_mqtt_env(monkeypatch)
+        monkeypatch.setenv("MQTT_BROKER_PORT", "0")
+        with pytest.raises(ValueError, match="between 1 and 65535"):
+            get_mqtt_config()
+
+    def test_rejects_invalid_qos(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        self._clear_mqtt_env(monkeypatch)
+        monkeypatch.setenv("MQTT_QOS", "3")
+        with pytest.raises(ValueError, match="must be 0, 1, or 2"):
+            get_mqtt_config()
+
+    def test_rejects_non_positive_publish_interval(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._clear_mqtt_env(monkeypatch)
+        monkeypatch.setenv("MQTT_PUBLISH_INTERVAL_SECONDS", "0")
+        with pytest.raises(ValueError, match="must be positive"):
+            get_mqtt_config()
+
+    def test_rejects_non_positive_drain_batch_size(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._clear_mqtt_env(monkeypatch)
+        monkeypatch.setenv("MQTT_DRAIN_BATCH_SIZE", "-5")
+        with pytest.raises(ValueError, match="must be positive"):
+            get_mqtt_config()
+
+    def test_empty_username_string_is_treated_as_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._clear_mqtt_env(monkeypatch)
+        monkeypatch.setenv("MQTT_USERNAME", "")
+        assert get_mqtt_config().username is None

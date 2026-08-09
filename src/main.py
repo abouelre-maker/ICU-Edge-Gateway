@@ -22,13 +22,19 @@ from config import (
     get_mllp_enabled,
     get_mllp_host,
     get_mllp_port,
+    get_mqtt_config,
+    get_mqtt_enabled,
 )
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from infrastructure.streaming.mllp_listener import MLLPListener
+from infrastructure.streaming.mqtt_publisher import MQTTPublisher
+from infrastructure.streaming.ring_buffer import StoreAndForwardRingBuffer
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
+
+_FORWARD_BUFFER_CAPACITY = 10_000
 
 
 @asynccontextmanager
@@ -45,11 +51,26 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     directly over MLLP (port 2575 by default) in addition to
     POST /api/v1/ingest. Disabled by default — existing HTTP-only
     deployments are unaffected. See infrastructure/streaming/mllp_listener.py.
+
+    When MQTT_ENABLED=true, an MQTTPublisher drains the same
+    StoreAndForwardRingBuffer and forwards each FHIR Bundle to a cloud
+    broker. The buffer is created unconditionally (cheap, in-memory) so
+    either component can be enabled independently. Disabled by default.
+    See infrastructure/streaming/mqtt_publisher.py.
     """
     app.state.start_time = time.monotonic()
+    app.state.forward_buffer = StoreAndForwardRingBuffer(
+        capacity=_FORWARD_BUFFER_CAPACITY
+    )
     app.state.mllp_listener = None
+    app.state.mqtt_publisher = None
+
     if get_mllp_enabled():
-        listener = MLLPListener(host=get_mllp_host(), port=get_mllp_port())
+        listener = MLLPListener(
+            host=get_mllp_host(),
+            port=get_mllp_port(),
+            forward_buffer=app.state.forward_buffer,
+        )
         await listener.start()
         app.state.mllp_listener = listener
         _log.info(
@@ -57,8 +78,34 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
             host=get_mllp_host(),
             port=listener.port,
         )
+
+    if get_mqtt_enabled():
+        mqtt_config = get_mqtt_config()
+        publisher = MQTTPublisher(
+            buffer=app.state.forward_buffer,
+            broker_host=mqtt_config.broker_host,
+            broker_port=mqtt_config.broker_port,
+            topic_prefix=mqtt_config.topic_prefix,
+            client_id=mqtt_config.client_id,
+            use_tls=mqtt_config.use_tls,
+            qos=mqtt_config.qos,
+            username=mqtt_config.username,
+            password=mqtt_config.password,
+            publish_interval_seconds=mqtt_config.publish_interval_seconds,
+            drain_batch_size=mqtt_config.drain_batch_size,
+        )
+        await publisher.start()
+        app.state.mqtt_publisher = publisher
+        _log.info(
+            "icu_edge_gateway.mqtt_publisher.started",
+            broker_host=mqtt_config.broker_host,
+            broker_port=mqtt_config.broker_port,
+        )
+
     _log.info("icu_edge_gateway.startup", version=app.version)
     yield
+    if app.state.mqtt_publisher is not None:
+        await app.state.mqtt_publisher.stop()
     if app.state.mllp_listener is not None:
         await app.state.mllp_listener.stop()
     uptime = round(time.monotonic() - app.state.start_time, 2)

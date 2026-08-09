@@ -6,3 +6,15 @@ structlog
 hl7apy
 fastapi
 uvicorn
+# SOUP (IEC 62304 §8.1.2): paho-mqtt==2.1.0 (Eclipse Foundation MQTT client).
+# Pinned exact version per Phase 5 Section A (edge->cloud MQTT publisher).
+# Vetting note (2026-08-09): Endor Labs automated SCA review could not run in
+# this environment (no endorctl configured) and returned an evidence-limited
+# NOT_RECOMMENDED verdict -- an absence of evidence, not a finding against the
+# package. Substituted manual web research found no CVEs against the Python
+# client (the one 2025 Paho CVE, CVE-2025-10543, affects only the Go client,
+# paho.mqtt.golang) and an actively maintained upstream. This is a WEB-SOURCED,
+# NOT ENDOR-VERIFIED SOUP determination -- flagged for human re-verification
+# against a proper SCA tool before production sign-off. See
+# src/infrastructure/streaming/mqtt_publisher.py module docstring.
+paho-mqtt==2.1.0
