@@ -1,0 +1,40 @@
+SOUP Evidence Artifact — pip-audit dependency CVE scan
+IEC 62304 §8.1.2 — SOUP (paho-mqtt==2.1.0, httpx==0.25.2) vetting evidence
+Generated: 2026-08-09
+Command attempted: pip-audit --requirement requirements.txt --progress-spinner off
+pip-audit version: 2.6.1
+----------------------------------------------------------------------
+RESULT: INCOMPLETE -- NOT USABLE AS SOUP EVIDENCE.
+
+pip-audit's default requirements-file mode resolves the FULL transitive
+dependency tree by having pip actually install every package in
+requirements.txt (numpy, scipy, fastapi, uvicorn, hl7apy, paho-mqtt,
+httpx, ...) into an ephemeral environment before querying PyPI's JSON
+API per package for known vulnerabilities. In this sandboxed dev
+environment that resolution step did not complete within ~20 minutes
+across three attempts (a bare run, a --timeout 60 retry, and a -v
+verbose retry -- see 2026-08-09_pip-audit_v2.txt, which shows the run
+progressed past argument parsing and stalled during dependency
+resolution, not on network reachability: 'curl https://pypi.org' from
+this same shell returned HTTP 200 in <1s).
+
+This is an environment limitation, not a security finding -- it is
+NOT evidence that paho-mqtt==2.1.0 or httpx==0.25.2 are clean, and
+must not be read as such. GAP flagged for human re-run in an
+unrestricted CI/build environment (the project's own GitHub Actions
+workflow already runs 'pip-audit --requirement requirements.txt
+--progress-spinner off' on every push -- see .github/workflows/ci.yml
+step 'pip-audit — dependency CVE scan') before production sign-off.
+The requirements.txt inline vetting notes for paho-mqtt and httpx
+remain WEB-SOURCED, NOT ENDOR-VERIFIED, NOT PIP-AUDIT-VERIFIED as of
+this artifact.
+
+ADDENDUM: a fourth attempt using --no-deps (direct dependencies only, no
+transitive-tree resolution) was tried specifically to avoid the pip-install
+resolution stall described above. It also did not complete -- its log
+(2026-08-09_pip-audit_nodeps.txt, now removed) contained only pip-audit's
+argument-parse/warning lines, no scan result, table, or error after several
+minutes. This closes out retries on this artifact per explicit instruction:
+accept the incomplete state as final, stop retrying. pip-audit remains
+UNRUN in this sandboxed environment across four attempts (bare, --timeout 60,
+-v, --no-deps -v); this is an environment limitation, not a security finding.

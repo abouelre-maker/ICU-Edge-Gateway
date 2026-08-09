@@ -33,3 +33,24 @@ paho-mqtt==2.1.0
 # re-verification before production sign-off. See
 # src/infrastructure/streaming/subscription_dispatcher.py module docstring.
 httpx==0.25.2
+# SOUP (IEC 62304 §8.1.2): cryptography==50.0.0 (Python Cryptographic
+# Authority / pyca). New Phase 5 Section B production runtime dependency --
+# used ONLY for local ECDSA keypair generation and CSR construction as part
+# of the device-identity enrollment/bootstrap feature
+# (infrastructure/provisioning/device_identity.py). This process never
+# parses attacker-controlled ciphertext with this library (no PKCS#7/CMS
+# decryption path is used), so the library's most sensitive attack surface
+# is not exercised here.
+# Vetting note (2026-08-09): the Endor Labs dependency-reviewer agent could
+# not obtain live evidence in this environment (endorctl not installed / no
+# Endor MCP tools registered -- same constraint already documented for
+# paho-mqtt and httpx above) and returned no CVE/maintenance/license
+# evidence. Manual web research: 50.0.0 (released 2026-07-31) is pyca's
+# current release and itself FIXES CVE-2026-69247 (a PKCS#7 EnvelopedData
+# timing/Bleichenbacher-oracle issue in decrypt paths this module does not
+# use); no unfixed CVEs were found against 50.0.0. BSD-3-Clause/Apache-2.0
+# dual-licensed, actively maintained. This is a WEB-SOURCED, NOT
+# ENDOR-VERIFIED SOUP determination -- flagged for human re-verification
+# against Endor (or an equivalent SCA tool) before production sign-off,
+# same as the other two SOUP entries in this file.
+cryptography==50.0.0
