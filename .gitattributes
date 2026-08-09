@@ -1,0 +1,6 @@
+# Phase 5 Section B: core.autocrlf=true on Windows dev machines (this
+# repo's) would otherwise convert docker/entrypoint.sh's line endings to
+# CRLF on checkout, which breaks its `#!/bin/sh` shebang inside the Alpine
+# container (`/bin/sh^M: bad interpreter`). Force LF for shell scripts
+# regardless of the checking-out OS/git config.
+*.sh text eol=lf
