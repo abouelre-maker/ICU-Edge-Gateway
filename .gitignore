@@ -33,3 +33,13 @@ dist/
 # ── OS ─────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── Local scratch / non-source artifacts (untracked, not part of the codebase) ──
+# These were found sitting at repo root outside version control; ignored rather
+# than deleted per session decision on 2026-08-09. Not reviewed for content.
+ICU-Edge-Gateway_Pitch_Deck.pptx
+ICU_Edge_Gateway_Risk_Register_2.xlsx
+files.zip
+files/
+icu_full_code.txt
+merge_code.py

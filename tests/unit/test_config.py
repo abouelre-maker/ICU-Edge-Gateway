@@ -10,7 +10,12 @@ with an unsafe configuration and correctly parses a valid one.
 from __future__ import annotations
 
 import pytest
-from config import get_cors_allowed_origins
+from config import (
+    get_cors_allowed_origins,
+    get_mllp_enabled,
+    get_mllp_host,
+    get_mllp_port,
+)
 
 
 class TestGetCorsAllowedOriginsDefault:
@@ -92,3 +97,72 @@ class TestGetCorsAllowedOriginsRejectsUnsafeValues:
         monkeypatch.setenv("CORS_ALLOWED_ORIGINS", ",,,")
         with pytest.raises(ValueError, match="non-empty"):
             get_cors_allowed_origins()
+
+
+class TestGetMllpEnabled:
+    """Phase 5 Section A: MLLP listener is opt-in, disabled by default."""
+
+    def test_disabled_by_default_when_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MLLP_ENABLED", raising=False)
+        assert get_mllp_enabled() is False
+
+    @pytest.mark.parametrize("value", ["true", "True", "TRUE", "1", "yes"])
+    def test_truthy_values_enable(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        monkeypatch.setenv("MLLP_ENABLED", value)
+        assert get_mllp_enabled() is True
+
+    @pytest.mark.parametrize("value", ["false", "False", "0", "no", "", "garbage"])
+    def test_falsy_or_unrecognized_values_disable(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        monkeypatch.setenv("MLLP_ENABLED", value)
+        assert get_mllp_enabled() is False
+
+
+class TestGetMllpHost:
+    def test_defaults_to_bind_all_interfaces(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MLLP_HOST", raising=False)
+        assert get_mllp_host() == "0.0.0.0"
+
+    def test_reads_explicit_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MLLP_HOST", "10.0.0.5")
+        assert get_mllp_host() == "10.0.0.5"
+
+
+class TestGetMllpPort:
+    def test_defaults_to_conventional_mllp_port(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("MLLP_PORT", raising=False)
+        assert get_mllp_port() == 2575
+
+    def test_reads_explicit_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MLLP_PORT", "9999")
+        assert get_mllp_port() == 9999
+
+    def test_rejects_non_integer(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MLLP_PORT", "not-a-port")
+        with pytest.raises(ValueError, match="must be an integer"):
+            get_mllp_port()
+
+    def test_rejects_out_of_range_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MLLP_PORT", "70000")
+        with pytest.raises(ValueError, match="between 0 and 65535"):
+            get_mllp_port()
+
+    def test_rejects_negative_port(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("MLLP_PORT", "-1")
+        with pytest.raises(ValueError, match="between 0 and 65535"):
+            get_mllp_port()
+
+    def test_zero_port_is_valid_and_means_ephemeral(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv("MLLP_PORT", "0")
+        assert get_mllp_port() == 0

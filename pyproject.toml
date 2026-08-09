@@ -51,6 +51,7 @@ module = [
   "api.v1.ingest",
   "domain.services.vitals_orchestrator",
   "infrastructure.adapters.hl7v2_adapter",
+  "infrastructure.streaming.mllp_listener",
 ]
 disable_error_code = ["attr-defined"]
 
