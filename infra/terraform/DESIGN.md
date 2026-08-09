@@ -26,7 +26,7 @@ comment) is where the value for that Secret's `ca_bundle.pem` key comes
 from, and
 `modules/provisioning-api`'s issued enrollment tokens (via whatever
 operator/fleet-management process calls it — not implemented in this pass,
-see §4) are the value that belongs in that Secret's `token` key. **This
+see §5) are the value that belongs in that Secret's `token` key. **This
 Terraform does NOT itself populate the k3s Secret** — that would require
 this Terraform to have credentials into every edge cluster it doesn't own
 or manage (out of scope, and a bigger blast-radius than a provisioning
@@ -76,11 +76,18 @@ anything other than step-ca itself).
 
 ## 3. Telemetry ingestion — options considered
 
-| Option | Device-identity fit | Notes |
-|---|---|---|
-| **A. AWS IoT Core + Kinesis Data Streams** — chosen | Strong — IoT Core supports **registering your own CA** ("bring your own CA" / JITR) for X.509 device authentication, so devices authenticate with the SAME cert this project's own CA (step-ca, above) already issues them. No second trust chain. | IoT Core rule routes matching MQTT topics into Kinesis for durable, ordered downstream processing. This reuses the existing device-side `mqtt_publisher.py` unmodified — it already speaks MQTT+mTLS. |
-| B. Azure IoT Hub | Comparable — IoT Hub's DPS (Device Provisioning Service) also supports X.509 CA-based device auth with a customer-owned root/intermediate CA. | Legitimate alternative if the org's cloud is already Azure. Not chosen here only because there's no existing Azure signal in this project; the technical fit is genuinely close to option A. |
-| C. GCP Pub/Sub | Weak, as a *device-identity* layer specifically | Pub/Sub itself is a generic message bus with no built-in device-certificate authentication. The natural pairing would have been **Google Cloud IoT Core**, which Google retired in August 2023 — there is no current GCP-native equivalent to AWS IoT Core / Azure IoT Hub's device-management + X.509 CA auth layer. Using Pub/Sub alone would require hand-building device authentication (e.g. short-lived JWTs signed by the device cert, verified by a Cloud Run/Function in front of Pub/Sub) — meaningfully more custom work than A or B for the same outcome. |
+Cost column added retroactively to match §2's rigor -- the first pass of
+this table had qualitative "fit" notes only, no dollar figures, which was
+an inconsistency in how thoroughly the two decisions were justified.
+Figures are rough, small/mid-fleet-scale estimates (order of ~100 devices,
+minute-interval telemetry), not a quote -- re-estimate before committing
+real budget.
+
+| Option | Cost (rough, monthly) | Device-identity fit | Notes |
+|---|---|---|---|
+| **A. AWS IoT Core + Kinesis Data Streams** — chosen | IoT Core connectivity ~$0.08/million-minutes + Kinesis 1 shard ~$11/mo + PUT payload units ~$1-2/mo at this volume: **~$15-25/mo** | Strong — IoT Core supports **registering your own CA** ("bring your own CA" / JITR) for X.509 device authentication, so devices authenticate with the SAME cert this project's own CA (step-ca, above) already issues them. No second trust chain. | IoT Core rule routes matching MQTT topics into Kinesis for durable, ordered downstream processing. This reuses the existing device-side `mqtt_publisher.py` unmodified — it already speaks MQTT+mTLS. |
+| B. Azure IoT Hub | Standard S1 tier (cheapest tier with device-management/DPS features this design needs): **~$25/mo** flat, scales in ~$25/mo units per additional 400k msgs/day | Comparable — IoT Hub's DPS (Device Provisioning Service) also supports X.509 CA-based device auth with a customer-owned root/intermediate CA. | Legitimate alternative if the org's cloud is already Azure. Not chosen here only because there's no existing Azure signal in this project; the technical fit is genuinely close to option A. |
+| C. GCP Pub/Sub (+ hand-built device auth) | Pub/Sub itself is near-negligible at this volume (~$1-5/mo), but a Cloud Run/Function service to verify device-signed JWTs in front of it adds **~$5-15/mo compute, PLUS the engineering cost of building and maintaining that auth layer** — not reflected in the dollar figure | Weak, as a *device-identity* layer specifically | Pub/Sub itself is a generic message bus with no built-in device-certificate authentication. The natural pairing would have been **Google Cloud IoT Core**, which Google retired in August 2023 — there is no current GCP-native equivalent to AWS IoT Core / Azure IoT Hub's device-management + X.509 CA auth layer. Using Pub/Sub alone would require hand-building device authentication (e.g. short-lived JWTs signed by the device cert, verified by a Cloud Run/Function in front of Pub/Sub) — meaningfully more custom work than A or B for the same outcome, and that extra engineering/ops cost is the real reason this option ranks last, not the raw messaging price, which is actually the cheapest of the three. |
 
 **Chosen: Option A (AWS IoT Core + Kinesis).** Primary reason: IoT Core's
 own-CA registration means the SAME certificate `reattestation_loop()`/
@@ -97,7 +104,39 @@ CA cert with IoT Core), an IoT policy scoped to per-device MQTT topics
 convention `mqtt_publisher.py` already uses), an `aws_iot_topic_rule`
 routing that topic pattern into a Kinesis stream.
 
-## 4. Explicitly NOT built in this pass
+## 4. HAZARD-STREAM-012 (PROPOSED) — root CA custody & compromise blast radius
+
+Fleet-wide scope, distinct from the device-level HAZARD-STREAM-010/011.
+Also documented as a code-adjacent docstring in `modules/ca/main.tf`
+(this repo's existing convention for where hazards live). Not self-closed.
+
+**Mitigated so far:** EFS at-rest encryption
+(`aws_efs_file_system.ca_state`, `encrypted = true`); the CA private key
+never leaves step-ca's own process -- nothing in this Terraform handles
+it directly.
+
+**NOT mitigated -- two distinct gaps, surfaced while answering this
+hazard, not assumed away:**
+1. `/roots.pem` (step-ca's public root-cert endpoint) shares network
+   exposure with the CA's admin/signing/ACME API -- same port, same
+   security group, same internal-only NLB. This is currently
+   OVER-restricted to the point §1's documented bootstrap flow (an
+   operator running `curl .../roots.pem`) is not actually reachable
+   without separate VPN/bastion access into the VPC -- a real
+   inconsistency between what this document describes and what
+   `modules/ca`'s security group actually permits. Needs an explicit
+   decision (narrow public proxy for just that one path / require
+   bastion access / something else), not a silent fix.
+2. No fleet-wide CA-compromise recovery runbook exists: no
+   re-issuance-at-scale process, no plan for physically-deployed edge
+   appliances (real hospital hardware) that cannot promptly reach a
+   re-pointed control plane, no CRL/OCSP or equivalent revocation signal
+   beyond the per-device `reattest()` gaps HAZARD-STREAM-011 already
+   documents. A device unable to re-enroll during such an event keeps
+   operating on stale local data forwarding -- a clinical availability
+   concern, not just an infrastructure one.
+
+## 5. Explicitly NOT built in this pass
 
 - **The provisioning API's own admin/token-issuance path** — `modules/
   provisioning-api` implements `/enroll` and `/reattest` (the device-facing

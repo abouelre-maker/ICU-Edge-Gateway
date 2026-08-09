@@ -9,6 +9,38 @@
 # passthrough, security groups). The CA's root private key lives ONLY
 # inside step-ca's own process/EFS volume -- nothing in this module ever
 # touches it directly.
+#
+# HAZARD-STREAM-012 (PROPOSED -- pending human security/risk-management
+# sign-off; fleet-wide scope, distinct from the device-level
+# HAZARD-STREAM-010/011): root CA private key custody and the blast
+# radius of its compromise.
+#   Mitigated so far: EFS at-rest encryption (aws_efs_file_system.ca_state
+#   below, encrypted = true); the CA key never leaves step-ca's own
+#   process (nothing in this Terraform module handles it directly).
+#   NOT mitigated -- two distinct gaps, found while answering this hazard,
+#   not assumed away:
+#     1. /roots.pem (step-ca's public root-cert endpoint, see
+#        modules/ca/outputs.tf) shares network exposure with the CA's
+#        admin/signing/ACME API -- same port 9000, same security group,
+#        same internal-only NLB. This is currently OVER-restricted to the
+#        point the documented bootstrap flow (DESIGN.md §1, envs/dev's
+#        manual step #1: an operator running `curl .../roots.pem`) is not
+#        actually reachable without separate VPN/bastion access into this
+#        VPC -- a real inconsistency between what DESIGN.md describes and
+#        what aws_security_group.step_ca_task's ingress rule (below)
+#        actually permits. Needs an explicit decision: a narrow
+#        public-facing proxy for ONLY /roots.pem, vs. requiring bastion/
+#        VPN access as the intended channel, vs. something else -- not
+#        fixed silently here.
+#     2. No fleet-wide CA-compromise recovery runbook exists: no
+#        re-issuance-at-scale process, no plan for physically-deployed
+#        edge appliances (real hospital hardware, not just cloud
+#        resources) that cannot promptly reach a re-pointed control plane,
+#        and no CRL/OCSP or equivalent revocation signal beyond the
+#        per-device reattest() gaps HAZARD-STREAM-011 already documents.
+#        A device unable to re-enroll during such an event keeps
+#        operating on stale local data forwarding -- a clinical
+#        availability concern, not just an IT one.
 # =============================================================================
 
 resource "aws_efs_file_system" "ca_state" {
