@@ -39,6 +39,10 @@ Thumbs.db
 # than deleted per session decision on 2026-08-09. Not reviewed for content.
 ICU-Edge-Gateway_Pitch_Deck.pptx
 ICU_Edge_Gateway_Risk_Register_2.xlsx
+# Timestamped snapshots of the same register (e.g. .backup-20260810c-pre-interim-signoff.xlsx)
+# carry the same "no git-based recovery net desired" intent as the line above — extended here
+# per explicit confirmation on 2026-08-14, not silently assumed.
+ICU_Edge_Gateway_Risk_Register_2.backup-*.xlsx
 files.zip
 files/
 icu_full_code.txt
