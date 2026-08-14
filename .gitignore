@@ -16,6 +16,12 @@ venv/
 .venv/
 env/
 ENV/
+# Interpreter-version-specific throwaway venvs used for CI-reproduction
+# investigation (2026-08-14, see HAZARD-STREAM-013) -- not a naming
+# convention worth generalizing further, just covering the ones actually
+# created at repo root during that investigation.
+venv3*/
+venv*_versions.txt
 
 # ── IDE / Editor ───────────────────────────────────────────────────────
 .vscode/
