@@ -25,7 +25,11 @@ def get_mllp_enabled() -> bool:
 
 def get_mllp_host() -> str:
     """MLLP_HOST (default: 0.0.0.0 — edge appliance listens for LAN-side monitors)."""
-    return os.getenv("MLLP_HOST", "0.0.0.0")
+    # Bandit B104 (hardcoded_bind_all_interfaces): intentional -- this is an
+    # edge appliance that must accept MLLP connections from any bedside
+    # monitor on the ICU LAN, not a single known peer. Overridable via
+    # MLLP_HOST for deployments that want to narrow this.
+    return os.getenv("MLLP_HOST", "0.0.0.0")  # nosec B104
 
 
 def get_mllp_port() -> int:

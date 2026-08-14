@@ -107,7 +107,16 @@ class MLLPListener:
 
     def __init__(
         self,
-        host: str = "0.0.0.0",
+        # Bandit B104 (hardcoded_bind_all_interfaces): intentional design,
+        # not an oversight -- this listener's whole purpose (see module
+        # docstring above) is accepting MLLP connections from ICU bedside
+        # monitors and hospital interface engines generally, an unknown
+        # and variable set of LAN peers, not one fixed/known host. Binding
+        # a single interface would defeat that purpose. This default is
+        # also always overridden by config.get_mllp_host() at the actual
+        # construction site (main.py), itself overridable via MLLP_HOST
+        # for deployments that need to narrow this.
+        host: str = "0.0.0.0",  # nosec B104
         port: int = 2575,
         forward_buffer: StoreAndForwardRingBuffer[dict[str, Any]] | None = None,
         adapter: HL7v2Adapter | None = None,

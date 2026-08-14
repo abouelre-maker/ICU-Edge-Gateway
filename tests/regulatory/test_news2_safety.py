@@ -18,8 +18,14 @@ ISO 14971 Controls verified here:
 
 from __future__ import annotations
 
+import math
+import os
+import subprocess
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
+import pytest
 from domain.entities.news2_score import NEWS2RiskLevel, NEWS2Score
 from domain.entities.patient_context import PatientContext, SpO2Scale
 from domain.entities.vital_sign import (
@@ -28,7 +34,8 @@ from domain.entities.vital_sign import (
     VitalSignType,
     VitalSignUnit,
 )
-from domain.services.news2_calculator import NEWS2Calculator
+from domain.services.artifact_rejector import PhysiologicalBoundsChecker
+from domain.services.news2_calculator import NEWS2Calculator, NEWS2InsufficientDataError
 from domain.services.signal_processor import VitalSignProcessor
 
 _UTC = timezone.utc
@@ -295,3 +302,248 @@ class TestHazardCON001ConsciousnessScoring:
                 f"AVPULevel.{avpu_level.name} must score 3. Got {score.consciousness_score}. "
                 "ISO 14971 HAZARD-CON-001."
             )
+
+
+# ── HAZARD-DSP-007: NaN Scalar Rejection (Phase 5-Stream Section D) ──────────
+
+
+class TestHazardDsp007NanSpo2ExcludedNotScoredNormal:
+    """
+    ISO 14971 HAZARD-DSP-007, SpO2-specific case: this is the ASYMMETRIC,
+    clinically dangerous direction of the finding (see the register entry
+    for the full table across all five threshold-ladder parameters). Unlike
+    HR/RR/SBP/Temp, whose `<=`-chains all fall through to their HIGHEST-
+    severity band on NaN (false alarm -- safe direction, verified
+    separately), _score_spo2's Scale-1 ladder falls through to its LOWEST-
+    severity band (`return 0`, "normal") on NaN. A NaN SpO2 that reached
+    scoring, pre-fix, would have looked EXACTLY like a healthy 96%+ reading
+    -- false reassurance masking a real desaturation, the actual worst-case
+    direction for this hazard. Run through the FULL pipeline
+    (VitalSignProcessor.process() -> NEWS2Calculator.calculate()), not just
+    the scoring function in isolation, to prove the fix is effective at the
+    boundary that actually matters (is_within_physiological_bounds and the
+    mandatory-parameter check), not just at the arithmetic level.
+    """
+
+    def test_nan_spo2_is_excluded_not_silently_scored_normal(self) -> None:
+        """
+        Post-fix: SPO2 is a _REQUIRED_VITAL_TYPES member (news2_calculator.py)
+        -- once PhysiologicalBoundsChecker correctly flags a NaN scalar as
+        is_within_physiological_bounds=False, NEWS2Calculator._extract_value()
+        excludes it as a candidate entirely, and
+        _assert_required_parameters_present() must then find SPO2 missing
+        and refuse to score AT ALL -- not silently substitute score=0.
+        Otherwise-normal RR/HR/SBP/Temp (all real, valid values) to isolate
+        the SpO2 effect specifically.
+        """
+        vitals = _vitals(rr=16, spo2=float("nan"), sbp=120, hr=72, temp=37.0)
+
+        # Precondition: PhysiologicalBoundsChecker actually flagged it --
+        # if this assertion ever fails, the test below would pass for the
+        # wrong reason (SpO2 legitimately absent, not NaN-rejected).
+        spo2_processed = next(
+            p
+            for p in vitals
+            if p.original.vital_sign_type is VitalSignType.SPO2
+        )
+        assert spo2_processed.is_within_physiological_bounds is False, (
+            "Precondition failed: PhysiologicalBoundsChecker did not flag "
+            "the NaN SpO2 sample -- HAZARD-DSP-007 regression."
+        )
+
+        with pytest.raises(NEWS2InsufficientDataError, match="SPO2"):
+            _CALC.calculate(vitals, _S1)
+
+    def test_nan_spo2_never_produces_a_spo2_score_of_zero(self) -> None:
+        """
+        Explicit negative assertion, stated the way the hazard is actually
+        dangerous: this is NOT "raises some error" in the abstract -- it is
+        specifically "a NaN SpO2 must never be indistinguishable from a
+        genuinely healthy SpO2 reading (score 0)". NEWS2InsufficientDataError
+        IS that guarantee (no NEWS2Score object -- and therefore no
+        spo2_score -- is ever produced at all when SpO2 is unusable), proven
+        here by confirming calculate() does not return.
+        """
+        vitals = _vitals(rr=16, spo2=float("nan"), sbp=120, hr=72, temp=37.0)
+        with pytest.raises(NEWS2InsufficientDataError):
+            score = _CALC.calculate(vitals, _S1)
+            # Unreachable if the fix works -- documents what would have to
+            # be true (and wrong) for this test to pass for the wrong reason.
+            assert score.spo2_score != 0  # pragma: no cover
+
+
+# ── HAZARD-NEWS2-003 / Bandit B101 nosec pin: filter parity + -O survival ────
+#
+# Closes a specific gap this session's own code review flagged (Bandit B101
+# nosec review of the 6 `assert X is not None` lines in
+# NEWS2Calculator.calculate() / _extract_avpu()): those asserts were judged
+# safe to suppress because they merely re-confirm what
+# _assert_required_parameters_present()'s real `if missing: raise
+# NEWS2InsufficientDataError(...)` already established -- never the actual
+# safety-relevant validation. That judgment was argued in a code-review
+# comment, not proven. The two classes below prove it, using the same
+# "test the boundary that actually matters, through the real pipeline"
+# methodology as TestHazardDsp007NanSpo2ExcludedNotScoredNormal above,
+# generalized from that test's single SpO2 case to all 5 required types,
+# plus a genuine `python -O` run (not an assumption about what -O does).
+
+
+class TestNews2CalculatorFilterParityNeverDrifts:
+    """
+    _assert_required_parameters_present() and _extract_value() both read
+    the SAME `ProcessedVitalSign.is_within_physiological_bounds` flag off
+    the SAME `vitals` sequence -- they cannot disagree today. The only way
+    they could ever silently drift apart is a future edit that adds an
+    extra condition to one filter without mirroring it in the other (e.g.
+    _extract_value() starts also checking `outlier_count == 0` while
+    _assert_required_parameters_present() does not, or vice versa). This
+    class pins today's correct, agreeing behavior for all 5 required
+    types so such a drift fails a test immediately instead of surfacing
+    later as a silent None reaching an assert-guarded (and, per the nosec
+    review, potentially -O-stripped) scoring call.
+
+    PhysiologicalBoundsChecker.check() is monkeypatched to a minimal,
+    test-owned NaN-rejection contract (ok=False for NaN, ok=True
+    otherwise) rather than exercising the real scipy-adjacent checker --
+    this isolates the test to NEWS2Calculator's OWN internal consistency,
+    per Clean Architecture's "domain services tested independently"
+    principle already stated in signal_processor.py's docstring. The real
+    checker's NaN handling is what
+    TestHazardDsp007NanSpo2ExcludedNotScoredNormal already proves, through
+    the full DSP pipeline, for the SpO2 case.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _pin_nan_rejection_contract(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        def _fake_check(
+            self: PhysiologicalBoundsChecker,
+            vital_sign_type: VitalSignType,
+            value: float,
+        ) -> tuple[bool, str]:
+            if math.isnan(value):
+                return False, f"[test-pinned] NaN rejected for {vital_sign_type.name}."
+            return True, ""
+
+        monkeypatch.setattr(PhysiologicalBoundsChecker, "check", _fake_check)
+
+    @pytest.mark.parametrize(
+        "kwarg, vital_type",
+        [
+            ("rr", VitalSignType.RESPIRATORY_RATE),
+            ("spo2", VitalSignType.SPO2),
+            ("sbp", VitalSignType.SYSTOLIC_BP),
+            ("hr", VitalSignType.HEART_RATE),
+            ("temp", VitalSignType.TEMPERATURE_CELSIUS),
+        ],
+    )
+    def test_nan_in_any_required_type_raises_via_the_real_check_not_the_assert(
+        self, kwarg: str, vital_type: VitalSignType
+    ) -> None:
+        """
+        Make ONLY the parametrized type NaN (all other required types
+        stay real/valid). Precondition (same style as
+        TestHazardDsp007NanSpo2ExcludedNotScoredNormal): confirm the
+        (pinned) checker actually flagged it -- if this fails, the test
+        below would pass for the wrong reason. Then confirm
+        NEWS2Calculator.calculate() raises NEWS2InsufficientDataError
+        naming that exact type. If _assert_required_parameters_present()
+        and _extract_value() had drifted apart such that the former
+        considered this type present while the latter found no usable
+        candidate for it, calculate() would instead reach the
+        assert-guarded code path with a None value for this parameter.
+        """
+        vitals = _vitals(**{kwarg: float("nan")})
+
+        target = next(p for p in vitals if p.original.vital_sign_type is vital_type)
+        assert target.is_within_physiological_bounds is False, (
+            f"Precondition failed: the pinned bounds checker did not flag "
+            f"the NaN {vital_type.name} sample -- test would pass for the "
+            f"wrong reason."
+        )
+
+        with pytest.raises(NEWS2InsufficientDataError, match=vital_type.value):
+            _CALC.calculate(vitals, _S1)
+
+
+class TestNews2CalculatorAssertsAreProvablyRedundantUnderDashO:
+    """
+    TestNews2CalculatorFilterParityNeverDrifts proves the two filters
+    agree today, under normal (non-optimized) execution -- the same mode
+    every other test in this suite runs under, where the 6 nosec'd
+    asserts are still live. That leaves the actual claim in the nosec
+    comments -- "even if `python -O` stripped these, the values are
+    guaranteed non-None by [_assert_required_parameters_present()], not
+    by these asserts" -- unverified by anything in this suite. This class
+    verifies it directly: spawns a REAL `python -O` subprocess (CPython's
+    documented assert-stripping flag, not a simulation of it) reproducing
+    the missing-required-vital scenario, and confirms
+    NEWS2InsufficientDataError is still what happens -- not a silent
+    score, not (impossible under -O anyway) an AssertionError.
+
+    One representative required type (HEART_RATE) is used, not all 5 --
+    the parity test above already proves the 5 types are structurally
+    identical in how the two filters treat them; this subprocess check
+    exists to verify the -O claim once, not to re-prove per-type parity a
+    second time at subprocess cost. All verification inside the child
+    script uses explicit if/raise/sys.exit, never `assert` -- an `assert`
+    written inside a script that is itself invoked with `-O` would be
+    stripped too, which would silently defeat the very thing being
+    tested.
+    """
+
+    def test_missing_heart_rate_still_raises_insufficient_data_under_python_dash_o(
+        self,
+    ) -> None:
+        src_dir = Path(__file__).resolve().parents[2] / "src"
+        script = """
+import sys
+
+if __debug__:
+    print("SETUP-FAIL: __debug__ is True -- this process is not actually running under -O.")
+    sys.exit(2)
+
+from datetime import datetime, timezone
+
+from domain.entities.patient_context import PatientContext, SpO2Scale
+from domain.entities.vital_sign import VitalSignSample, VitalSignType, VitalSignUnit
+from domain.services.news2_calculator import NEWS2Calculator, NEWS2InsufficientDataError
+from domain.services.signal_processor import VitalSignProcessor
+
+ts = datetime(2024, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+proc = VitalSignProcessor()
+samples = [
+    VitalSignSample(VitalSignType.RESPIRATORY_RATE, 16, VitalSignUnit.BREATHS_PER_MIN, ts),
+    VitalSignSample(VitalSignType.SPO2, 98.0, VitalSignUnit.PERCENT, ts),
+    VitalSignSample(VitalSignType.SYSTOLIC_BP, 120.0, VitalSignUnit.MMHG, ts),
+    VitalSignSample(VitalSignType.HEART_RATE, float("nan"), VitalSignUnit.BPM, ts),
+    VitalSignSample(VitalSignType.TEMPERATURE_CELSIUS, 37.0, VitalSignUnit.CELSIUS, ts),
+]
+vitals = [proc.process(s) for s in samples]
+ctx = PatientContext(patient_id="PT-REG-OFLAG", spo2_scale=SpO2Scale.SCALE_1)
+
+try:
+    score = NEWS2Calculator().calculate(vitals, ctx)
+except NEWS2InsufficientDataError as exc:
+    if "HEART_RATE" not in str(exc):
+        print(f"FAIL: raised but did not name HEART_RATE: {exc}")
+        sys.exit(1)
+    print("OK: NEWS2InsufficientDataError raised and names HEART_RATE, under -O.")
+    sys.exit(0)
+else:
+    print(f"FAIL: calculate() returned a score instead of raising: {score!r}")
+    sys.exit(1)
+"""
+        result = subprocess.run(
+            [sys.executable, "-O", "-c", script],
+            capture_output=True,
+            text=True,
+            timeout=30,
+            env={**os.environ, "PYTHONPATH": str(src_dir)},
+        )
+        assert result.returncode == 0, (
+            "python -O subprocess did not confirm the expected fail-safe "
+            f"behavior.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "OK: NEWS2InsufficientDataError raised" in result.stdout, (
+            f"Unexpected subprocess stdout: {result.stdout}"
+        )

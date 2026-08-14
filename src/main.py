@@ -284,7 +284,14 @@ app: FastAPI = create_app()
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        # Bandit B104 (hardcoded_bind_all_interfaces): standard container
+        # practice -- bind-all inside the container; the actual network
+        # exposure boundary is the container/k3s network policy, not this
+        # bind address. This block is also only the local `python main.py`
+        # dev entrypoint; the production container entrypoint
+        # (docker/entrypoint.sh) invokes uvicorn directly via CLI args,
+        # bypassing this line entirely.
+        host="0.0.0.0",  # nosec B104
         port=8000,
         workers=1,
         reload=False,
