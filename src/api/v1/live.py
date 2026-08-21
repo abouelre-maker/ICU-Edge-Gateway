@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 
 import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -50,7 +51,33 @@ async def live_vitals_ws(websocket: WebSocket) -> None:
     async def _sender() -> None:
         while True:
             delta = await queue.get()
-            await websocket.send_json(delta)
+
+            # ISO 14971 HAZARD-DSP-007 defense-in-depth policy (explicit,
+            # not a relied-upon framework default -- see
+            # mqtt_publisher.py's identical policy comment for the full
+            # reasoning). websocket.send_json() (Starlette) calls plain
+            # json.dumps() internally with NO allow_nan override -- unlike
+            # the HTTP JSON API's JSONResponse, which happens to default to
+            # allow_nan=False -- so it would otherwise SILENTLY push a
+            # non-RFC-8259-compliant bare `NaN`/`Infinity` token to every
+            # connected dashboard client with no error and no indication
+            # anything was wrong. Serialize explicitly instead of calling
+            # send_json() directly, so this boundary is covered too.
+            try:
+                text = json.dumps(delta, allow_nan=False)
+            except ValueError as exc:
+                # A poison-pill delta, not a connection problem: skip it
+                # and keep the connection open for the NEXT delta, rather
+                # than letting the exception propagate and tear down this
+                # client's entire live feed over one corrupted item (that
+                # would be a strictly worse outcome for the connected
+                # dashboard than just missing one update).
+                _log.error(
+                    "live_vitals_ws.delta_not_json_serializable", error=str(exc)
+                )
+                continue
+
+            await websocket.send_text(text)
 
     async def _receiver() -> None:
         while True:

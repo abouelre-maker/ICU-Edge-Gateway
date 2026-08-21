@@ -146,6 +146,71 @@ class TestPublishBatchSync:
         assert len(fake.published) == 1  # only PT-001 made it through
 
 
+class TestHazardDsp007NonFiniteBundleNeverPublished:
+    """
+    ISO 14971 HAZARD-DSP-007 defense-in-depth: json.dumps(bundle,
+    allow_nan=False) in _publish_batch_sync must raise on a non-finite
+    value, and that must be handled as a poison-pill (dropped, logged,
+    NOT requeued, NOT blocking sibling items in the same batch) -- distinct
+    from a network/broker failure, which DOES requeue and DOES block
+    (see test_first_failure_stops_batch_and_returns_remainder_in_order
+    above for that contrasting behavior).
+    """
+
+    def _bundle_with_nan_value(self, patient_id: str) -> dict[str, Any]:
+        bundle = _bundle_for_patient(patient_id)
+        bundle["entry"][0]["resource"]["valueQuantity"] = {
+            "value": float("nan"),
+            "unit": "%",
+        }
+        return bundle
+
+    def test_non_finite_bundle_is_never_handed_to_the_mqtt_client(self) -> None:
+        pub, _, fake = _publisher_with_fake_client()
+        batch = [self._bundle_with_nan_value("PT-NAN-001")]
+
+        pub._publish_batch_sync(batch)
+
+        assert fake.published == [], (
+            "A bundle containing NaN must never reach client.publish() -- "
+            "json.dumps(allow_nan=False) must raise before that call."
+        )
+
+    def test_non_finite_bundle_is_dropped_not_requeued(self) -> None:
+        """Retrying an unserializable bundle can never succeed -- it must
+        NOT come back out in `unpublished` (that would requeue it forever)."""
+        pub, _, fake = _publisher_with_fake_client()
+        batch = [self._bundle_with_nan_value("PT-NAN-001")]
+
+        unpublished = pub._publish_batch_sync(batch)
+
+        assert unpublished == []
+        assert fake.published == []
+
+    def test_non_finite_bundle_does_not_block_sibling_bundles_in_the_batch(
+        self,
+    ) -> None:
+        """The key behavioral difference from a broker/network failure:
+        a poison-pill bundle must NOT set the batch's `failing` flag --
+        every valid sibling bundle, before AND after it in the batch, must
+        still be published."""
+        pub, _, fake = _publisher_with_fake_client()
+        batch = [
+            _bundle_for_patient("PT-001"),
+            self._bundle_with_nan_value("PT-NAN-001"),
+            _bundle_for_patient("PT-003"),
+        ]
+
+        unpublished = pub._publish_batch_sync(batch)
+
+        assert unpublished == []
+        published_topics = {topic for topic, _, _ in fake.published}
+        assert published_topics == {
+            "icu-edge/vitals/PT-001",
+            "icu-edge/vitals/PT-003",
+        }
+
+
 async def _wait_until(
     predicate: Callable[[], bool], timeout: float = 2.0, interval: float = 0.01
 ) -> None:

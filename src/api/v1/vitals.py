@@ -316,6 +316,12 @@ async def ingest_vitals(
     if subscription_dispatcher is not None:
         await subscription_dispatcher.dispatch(bundle)
 
+    # ISO 14971 HAZARD-DSP-007 defense-in-depth policy, made explicit here
+    # rather than left as a silent side effect -- see ingest.py's identical
+    # comment for the full reasoning: Starlette's JSONResponse.render()
+    # calls json.dumps(..., allow_nan=False) internally, so a non-finite
+    # value anywhere in `bundle` fails this response with an error rather
+    # than being silently delivered.
     return JSONResponse(
         content=bundle,
         media_type="application/fhir+json",

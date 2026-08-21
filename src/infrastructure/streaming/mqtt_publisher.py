@@ -256,7 +256,43 @@ class MQTTPublisher:
                 continue
 
             topic = self.topic_for(bundle)
-            payload = json.dumps(bundle)
+
+            # ISO 14971 HAZARD-DSP-007 defense-in-depth policy (explicit,
+            # not a relied-upon framework default -- unlike Starlette's
+            # JSONResponse, which happens to call json.dumps(...,
+            # allow_nan=False) for the HTTP JSON API path, plain json.dumps()
+            # defaults to allow_nan=True and would otherwise SILENTLY emit a
+            # non-RFC-8259-compliant bare `NaN`/`Infinity` token to this
+            # cloud MQTT broker with no error and no indication anything
+            # was wrong. The root cause (a non-finite scalar reaching a
+            # Bundle at all) is fixed upstream in
+            # PhysiologicalBoundsChecker/artifact_rejector.py -- this is a
+            # second, independent layer at the actual serialization
+            # boundary, so a future bug anywhere else in the pipeline still
+            # cannot leak a non-finite value onto the wire silently.
+            try:
+                payload = json.dumps(bundle, allow_nan=False)
+            except ValueError as exc:
+                # A poison-pill, not a transient failure: retrying this
+                # exact bundle will NEVER succeed (its contents are
+                # structurally invalid, not the broker being unreachable) --
+                # unlike the network-failure branch below, this must NOT
+                # set failing=True (that would block every OTHER, valid
+                # bundle in this batch behind an item that can never be
+                # fixed by retrying) and must NOT be requeued (an infinite
+                # retry loop of a permanently-unserializable item would
+                # itself become a denial-of-service on the entire publish
+                # pipeline). Logged at .error() -- distinct from
+                # publish_failed's .warning() -- because this indicates a
+                # data-integrity control upstream of this module did not
+                # catch a non-finite value, which is itself audit-worthy.
+                _log.error(
+                    "mqtt_publisher.bundle_not_json_serializable",
+                    topic=topic,
+                    error=str(exc),
+                )
+                continue
+
             try:
                 info = self._client.publish(topic, payload, qos=self._qos)
                 if info.rc != mqtt.MQTT_ERR_SUCCESS:

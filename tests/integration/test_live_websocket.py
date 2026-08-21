@@ -84,6 +84,81 @@ class TestLiveWebsocketHttpIngestDelta:
 
 
 @pytest.mark.integration
+class TestLiveWebsocketHazardDsp007NonFiniteDelta:
+    """
+    ISO 14971 HAZARD-DSP-007 defense-in-depth, at the actual WebSocket
+    boundary. LiveDashboardChannel.broadcast() itself does not sanitize its
+    `bundle` argument (by design -- it only wraps/enqueues; see
+    live_dashboard_channel.py's build_delta()), so this test drives a
+    NaN-poisoned bundle directly into broadcast() -- bypassing the
+    (already-fixed) upstream NEWS2/ObservationBuilder path entirely -- to
+    prove the WS *sender* itself is the safety boundary, not merely a
+    beneficiary of the upstream fix. Uses `client.portal` (Starlette
+    TestClient's underlying anyio BlockingPortal, the same event loop the
+    ASGI app and its connected WebSocket run on) to call the async
+    broadcast() from this synchronous test.
+    """
+
+    @staticmethod
+    def _nan_poisoned_bundle(patient_id: str = "PT-NAN-WS") -> dict:
+        return {
+            "resourceType": "Bundle",
+            "entry": [
+                {
+                    "resource": {
+                        "resourceType": "Observation",
+                        "subject": {"reference": f"Patient/{patient_id}"},
+                        "valueQuantity": {"value": float("nan"), "unit": "%"},
+                    }
+                }
+            ],
+        }
+
+    def test_non_finite_delta_is_not_delivered_but_connection_survives(self) -> None:
+        app = create_app()
+        with (
+            TestClient(app) as client,
+            client.websocket_connect("/api/v1/live/vitals") as ws,
+        ):
+            channel = client.app.state.live_dashboard_channel
+
+            # Poison delta first -- must be silently dropped (logged, not
+            # delivered), and must NOT close/break the connection.
+            client.portal.call(
+                channel.broadcast, self._nan_poisoned_bundle(), "http-vitals"
+            )
+
+            # A genuine, valid delta sent immediately after must still be
+            # delivered -- proving one corrupted item does not take down
+            # this client's entire live feed (the "no information at all"
+            # regression this test exists to rule out).
+            client.portal.call(
+                channel.broadcast, _bundle_for_patient("PT-GOOD-WS"), "http-vitals"
+            )
+
+            delta = ws.receive_json()
+            assert delta["patient_id"] == "PT-GOOD-WS", (
+                "The first delta received must be the GOOD one -- the "
+                "NaN-poisoned delta must never have been sent at all, not "
+                "merely reordered behind it."
+            )
+
+
+def _bundle_for_patient(patient_id: str) -> dict:
+    return {
+        "resourceType": "Bundle",
+        "entry": [
+            {
+                "resource": {
+                    "resourceType": "Observation",
+                    "subject": {"reference": f"Patient/{patient_id}"},
+                }
+            }
+        ],
+    }
+
+
+@pytest.mark.integration
 class TestLiveWebsocketMultipleClients:
     def test_all_connected_clients_receive_the_same_delta(self) -> None:
         app = create_app()
