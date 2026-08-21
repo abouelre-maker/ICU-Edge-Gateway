@@ -104,6 +104,70 @@ For containerized deployment, see the multi-stage `Dockerfile` (Alpine 3.19, non
 <150 MB target image) and [docs/DEPLOYMENT_RUNBOOK.md](docs/DEPLOYMENT_RUNBOOK.md) for the
 full step-by-step procedure.
 
+## Technical Demo
+
+`scripts/demo_run.sh` runs a single reproducible, real-pipeline demo on top of the
+**existing** `docker-compose.yml` stack (mock control plane + gateway + HL7 monitor
+simulator — see [Quickstart](#quickstart) above for what that stack is). It is not a
+mockup: every value it prints comes from the actually-running gateway container, over a
+real MLLP TCP socket and a real WebSocket connection — no simulated or hardcoded output.
+
+```bash
+./scripts/demo_run.sh
+```
+
+Requires Docker with Compose v2, `curl`, and a Python interpreter with `websockets`
+installed (`pip install -r requirements-dev.txt`).
+
+**What it does, and what a viewer is watching at each step:**
+
+1. **Brings up the stack** (`docker compose up -d`) and waits for `GET /health`. This is
+   the same mock control plane + gateway + `hl7-monitor-simulator` sidecar described in
+   [`docker-compose.yml`](docker-compose.yml) — nothing demo-specific is started.
+2. **Injects one HL7 v2.x ORU^R01 message** over the gateway's real MLLP listener (port
+   2575), the same protocol and framing the `hl7-monitor-simulator` sidecar already uses
+   continuously in the background. The message deliberately carries **two** Heart Rate
+   (LOINC 8867-4) readings for the same patient: a **450 bpm artifact spike** — outside
+   the `[20, 250]` physiological bound enforced by
+   [`artifact_rejector.py`](src/domain/services/artifact_rejector.py) — followed one
+   second later by a corrected, physiologically valid 82 bpm reading. *Why it matters:*
+   this is what a lead-off event, motion artifact, or transient sensor glitch looks like
+   on a real monitor feed — a single bad sample must not silently corrupt a clinical
+   score.
+3. **Shows the real gateway log output** for that message (`docker compose logs`,
+   filtered to this run's unique patient ID) — the structlog lines emitted by
+   [`vitals_orchestrator.py`](src/domain/services/vitals_orchestrator.py) and
+   [`mllp_listener.py`](src/infrastructure/streaming/mllp_listener.py) as the message is
+   actually processed, including `warning_count` (DSP flagged one artifact) and the
+   computed `total_score`. *Why it matters:* the rejection is visible in the same audit
+   log a real operations/clinical-engineering team would review — not just asserted by
+   this script.
+4. **Shows the resulting NEWS2 score.** Because
+   [`news2_calculator.py`](src/domain/services/news2_calculator.py) only ever scores the
+   most recent *within-bounds* sample per vital-sign type, the 450 bpm spike is excluded
+   and the score reflects the corrected 82 bpm reading (NEWS2 total 0, risk `NORMAL`).
+   *Why it matters:* had the spike NOT been rejected, `_score_heart_rate()` would have
+   scored it 3 — the most severe pulse-rate band — a **false critical-risk alert**
+   generated from a single bad sample, not a real deterioration. Artifact rejection is
+   what prevents that false score from ever reaching a clinician.
+5. **Shows the resulting FHIR R4 Bundle** — the same standards-based output
+   ([`bundle_assembler.py`](src/infrastructure/fhir/bundle_assembler.py)) any downstream
+   EHR or CDS system would receive, including the rejected-artifact note as a
+   `Bundle.note` / `OperationOutcome` audit entry rather than a silently dropped value.
+   *Why it matters:* this is not a demo-only summary — it is the literal interoperable
+   output this gateway produces for every real ingestion, HL7-in-FHIR-out.
+6. **Shows the live delta arriving on the WebSocket dashboard channel**
+   (`WS /api/v1/live/vitals`, [`live.py`](src/api/v1/live.py)) — the script itself
+   connects as a real WS client and prints the delta envelope as delivered, with no
+   polling involved. *Why it matters:* this is the same push-based channel a real
+   bedside dashboard would use — the NEWS2 score and Bundle above are shown exactly as a
+   dashboard client would receive them, in real time.
+
+The script separates two timings in its final summary: the **core demo** (steps 1–5,
+targeted at under 2 minutes) and the **end-to-end** total including compose
+startup/health-wait (which varies with whether images are already built). The stack is
+left running afterward; `docker compose down` to stop it.
+
 ## Test Suite & Quality Gates
 
 ```
