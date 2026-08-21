@@ -87,28 +87,60 @@ the QMS-002 §5 record, or that one role's authority explicitly covers the other
 CLINICAL SAFETY OFFICER APPOINTMENT RECORD
 ═══════════════════════════════════════════════════════════════════════════
 
-Organization:                  _________________________________________
+Organization:                   (solo-founder stage — no separate legal entity/QMS
+                                 org structure yet; project owner acting directly)
 Product covered:                ICU Edge-to-FHIR Interoperability Gateway v1.0.0
 
-Appointee Name:                 _________________________________________
-Credentials / License #:        _________________________________________
-Role Title:                     _________________________________________
-                                 [ Clinical Safety Officer / Medical Director /
-                                   Split-role — specify: __________________ ]
+Appointee Name:                 HOUSAM ABOUELREISH
+Credentials / License #:        NOT clinically credentialed per this document's
+                                 own §2 bar — interim engineering-authority
+                                 appointment only, project owner acting in the
+                                 absence of a credentialed CSO at this company
+                                 stage.
+Role Title:                     Interim / Acting — Engineering Sign-Off Authority
+                                 (NOT Clinical Safety Officer, NOT Medical
+                                 Director — this appointment does not claim
+                                 either title; see Scope below and §2's
+                                 unmet credential bar, restated above, not
+                                 waived)
 
-Effective Date:                 _________________________________________
-Delegated Authority Reference:  _________________________________________
-                                 (cite the Quality Manual provision)
+Effective Date:                 2026-08-10
+Delegated Authority Reference:  None — no Quality Manual exists at this company
+                                 stage to delegate from. This is a self-appointment
+                                 by the project owner, recorded honestly as such,
+                                 not implied to rest on any organizational
+                                 delegation that does not exist.
 
-Onboarding checklist (§4) completed:   [ Yes / In progress, target date: ____ ]
+Scope:                          Interim sign-off authority for engineering-
+                                 identified hazards ONLY. Explicitly does NOT
+                                 substitute for credentialed clinical review
+                                 before any patient-facing production use of
+                                 the NEWS2/DSP pipeline. A credentialed CSO
+                                 MUST formally ratify or revisit every hazard
+                                 signed under this interim arrangement before
+                                 Phase 5-Stream is considered clinically closed.
+
+Onboarding checklist (§4) completed:   No — not applicable to this interim,
+                                 non-clinical appointment; §4's checklist
+                                 presumes a clinically-credentialed appointee.
 
 Approved by (Quality/Regulatory lead):
-Name:                           _________________________________________
-Signature:                      _________________________________________
-Date:                           _________________________________________
+Name:                            N/A — no Quality/Regulatory lead exists at
+                                 this company stage. Self-appointment, per
+                                 above.
+Signature:                       N/A
+Date:                            2026-08-10
 
 ═══════════════════════════════════════════════════════════════════════════
 ```
+
+**This record does NOT retroactively ratify HAZARD-DSP-005 or HAZARD-DSP-006**
+(§1's original motivating hazards, which explicitly require the full clinical
+credential bar this appointment does not meet) — it exists solely so the
+newer, engineering-discovered hazards this appointment's Scope names
+(HAZARD-DSP-007, HAZARD-STREAM-012) have a genuine, honestly-dated
+interim sign-off to reference in the Risk Register, distinct from those two
+still-unratified, clinically-scoped items.
 
 ---
 
