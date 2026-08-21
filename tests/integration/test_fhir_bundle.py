@@ -196,6 +196,75 @@ class TestObservationBuilderOutOfBounds:
         assert "out-of-range" in codes
 
 
+class TestObservationBuilderHazardDsp007NanNeverReachesOutput:
+    """
+    ISO 14971 HAZARD-DSP-007: a NaN scalar value must never reach a FHIR
+    Observation as a plain numeric valueQuantity with no indication anything
+    is wrong -- confirmed here at the ObservationBuilder level (upstream of
+    EVERY delivery path: the HTTP JSON API, MQTT publishing, and FHIR
+    Subscription webhook delivery all consume this same builder's output).
+
+    Why this matters beyond the HTTP API specifically: mqtt_publisher.py and
+    subscription_dispatcher.py both serialize the assembled bundle with
+    plain `json.dumps(bundle)` (default allow_nan=True) -- UNLIKE Starlette's
+    JSONResponse, which happens to call json.dumps(..., allow_nan=False) and
+    would incidentally reject a NaN-containing bundle with a 500/422 rather
+    than deliver it. That incidental protection does NOT exist on the
+    MQTT/webhook paths -- so a NaN that reached valueQuantity would have
+    been silently transmitted to an external cloud consumer or a hospital's
+    own EHR Subscription endpoint as valid-looking JSON, with no
+    dataAbsentReason and no physiological-bounds-flag extension. The fix
+    (PhysiologicalBoundsChecker rejecting NaN) closes this at the SOURCE
+    (is_within_physiological_bounds=False), so no downstream serializer's
+    behavior matters -- proven below by confirming the value never even
+    reaches the dict, and separately that the dict IS still json.dumps-able
+    (with default allow_nan=True, the permissive stdlib behavior every
+    delivery path actually uses) without emitting any "NaN" token, because
+    there is nothing NaN left in it to emit.
+    """
+
+    def test_nan_value_produces_data_absent_reason_not_value_quantity(self) -> None:
+        processed = _make_processed(VitalSignType.SPO2, float("nan"))
+        obs = _OBS_BUILDER.build(processed, patient_id="PT-NAN-001")
+        assert "dataAbsentReason" in obs
+        assert "valueQuantity" not in obs
+
+    def test_nan_value_sets_physiological_bounds_flag_extension(self) -> None:
+        processed = _make_processed(VitalSignType.SPO2, float("nan"))
+        obs = _OBS_BUILDER.build(processed, patient_id="PT-NAN-001")
+        flag_ext = next(
+            e
+            for e in obs["extension"]
+            if e["url"].endswith("physiological-bounds-flag")
+        )
+        assert flag_ext["valueBoolean"] is True
+
+    def test_nan_observation_is_json_serializable_with_default_allow_nan(
+        self,
+    ) -> None:
+        """
+        Uses plain json.dumps() with NO allow_nan override -- exactly what
+        mqtt_publisher.py and subscription_dispatcher.py actually call.
+        Must succeed (no ValueError) AND must not contain a bare NaN token
+        anywhere in the output, proving the leak is closed at the source,
+        not merely caught by a stricter serializer downstream.
+        """
+        import json
+
+        processed = _make_processed(VitalSignType.SPO2, float("nan"))
+        obs = _OBS_BUILDER.build(processed, patient_id="PT-NAN-001")
+
+        serialized = json.dumps(obs)  # would raise if any float were NaN/Inf... it wouldn't here, since none remain
+
+        assert "NaN" not in serialized, (
+            "A bare NaN token in the JSON body would be silently emitted to "
+            "MQTT/webhook consumers using plain json.dumps() (default "
+            "allow_nan=True) -- HAZARD-DSP-007's actual worst-case wire "
+            "behavior, distinct from the HTTP JSON API path, which happens "
+            "to be protected by Starlette's allow_nan=False instead."
+        )
+
+
 # ── NEWS2ObservationBuilder Tests ──────────────────────────────────────────────
 
 
