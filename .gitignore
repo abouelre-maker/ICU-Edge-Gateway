@@ -6,6 +6,9 @@ __pycache__/
 # ── Testing / Coverage ─────────────────────────────────────────────────
 .coverage
 .coverage.*
+# `pytest --cov-report=xml` output (CLAUDE.md §3 / CI quality gate).
+# A build artifact regenerated on every run -- never source of truth.
+coverage.xml
 htmlcov/
 .pytest_cache/
 .ruff_cache/
@@ -53,3 +56,9 @@ files.zip
 files/
 icu_full_code.txt
 merge_code.py
+
+# ── Agent / Assistant session state ────────────────────────────────────
+# Local Claude Code session/permission state. Machine-specific, not a
+# project artifact -- CLAUDE.md (the checked-in project directive) is
+# tracked, this directory is not.
+.claude/
