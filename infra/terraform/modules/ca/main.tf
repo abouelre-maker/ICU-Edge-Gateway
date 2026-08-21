@@ -17,21 +17,21 @@
 #   Mitigated so far: EFS at-rest encryption (aws_efs_file_system.ca_state
 #   below, encrypted = true); the CA key never leaves step-ca's own
 #   process (nothing in this Terraform module handles it directly).
-#   NOT mitigated -- two distinct gaps, found while answering this hazard,
-#   not assumed away:
-#     1. /roots.pem (step-ca's public root-cert endpoint, see
-#        modules/ca/outputs.tf) shares network exposure with the CA's
-#        admin/signing/ACME API -- same port 9000, same security group,
-#        same internal-only NLB. This is currently OVER-restricted to the
-#        point the documented bootstrap flow (DESIGN.md §1, envs/dev's
-#        manual step #1: an operator running `curl .../roots.pem`) is not
-#        actually reachable without separate VPN/bastion access into this
-#        VPC -- a real inconsistency between what DESIGN.md describes and
-#        what aws_security_group.step_ca_task's ingress rule (below)
-#        actually permits. Needs an explicit decision: a narrow
-#        public-facing proxy for ONLY /roots.pem, vs. requiring bastion/
-#        VPN access as the intended channel, vs. something else -- not
-#        fixed silently here.
+#   Gap 1 ADDRESSED (see below) -- one gap remains NOT mitigated, found
+#   while answering this hazard, not assumed away:
+#     1. RESOLVED: /roots.pem (step-ca's public root-cert endpoint, see
+#        modules/ca/outputs.tf) used to share network exposure with the
+#        CA's admin/signing/ACME API -- same port 9000, same security
+#        group, same internal-only NLB -- which OVER-restricted the
+#        documented bootstrap flow (DESIGN.md §1, envs/dev's manual step
+#        #1: an operator running `curl .../roots.pem`) to the point it was
+#        not actually reachable without separate VPN/bastion access into
+#        this VPC. Resolved by modules/roots-proxy: a narrow public ALB +
+#        Lambda that permits GET /roots.pem ONLY, and nothing else --
+#        this module's own NLB, aws_lb_listener.step_ca (below), and
+#        aws_security_group.step_ca_task's ingress rule are all UNCHANGED
+#        by that fix (see modules/roots-proxy/main.tf's header for the
+#        full reasoning, and DESIGN.md §4's manual verification steps).
 #     2. No fleet-wide CA-compromise recovery runbook exists: no
 #        re-issuance-at-scale process, no plan for physically-deployed
 #        edge appliances (real hospital hardware, not just cloud

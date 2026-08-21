@@ -16,6 +16,7 @@ dev-only tooling) -- inserted manually below.
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
 
@@ -126,6 +127,70 @@ class TestMockControlPlaneMatchesDeviceContract:
         assert exc_info.value.status_code == 409
         assert exc_info.value.reason == "already_used"
         await client.aclose()
+
+    async def test_two_devices_racing_the_same_token_only_one_succeeds(
+        self, mock_app
+    ) -> None:
+        """
+        Phase 5-Stream Section D edge case: unlike the sequential-reuse test
+        above (redeem, THEN redeem again), this fires two DISTINCT devices'
+        enroll() calls at the mock control plane CONCURRENTLY
+        (asyncio.gather, not awaited one after another) for the SAME
+        single-use token, to prove _TokenStore.redeem's check-and-set
+        happens under one lock acquisition (app.py's actual single-use
+        guarantee) rather than merely working when nothing overlaps.
+        Exactly one of the two must receive a signed certificate; the other
+        must receive a genuine 409, never both succeeding and never both
+        failing.
+        """
+        from infrastructure.provisioning.device_identity import (
+            build_csr,
+            generate_private_key,
+        )
+        from infrastructure.provisioning.enrollment_client import (
+            DeviceEnrollmentClient,
+            TokenRejectedError,
+        )
+
+        csr_device_a = build_csr(generate_private_key(), common_name="racer-device-a")
+        csr_device_b = build_csr(generate_private_key(), common_name="racer-device-b")
+
+        def _client() -> DeviceEnrollmentClient:
+            return DeviceEnrollmentClient(
+                "https://mock-control-plane",
+                http_client=httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=mock_app),
+                    base_url="https://mock-control-plane",
+                ),
+                max_attempts=1,
+            )
+
+        client_a = _client()
+        client_b = _client()
+
+        results = await asyncio.gather(
+            client_a.enroll("single-use-token", csr_device_a),
+            client_b.enroll("single-use-token", csr_device_b),
+            return_exceptions=True,
+        )
+
+        successes = [r for r in results if not isinstance(r, BaseException)]
+        rejections = [r for r in results if isinstance(r, TokenRejectedError)]
+        other_errors = [
+            r for r in results if isinstance(r, BaseException) and r not in rejections
+        ]
+
+        assert other_errors == []
+        assert len(successes) == 1, (
+            "Exactly one racer must be issued a certificate -- "
+            f"got {len(successes)} successes out of 2 concurrent redemptions."
+        )
+        assert len(rejections) == 1
+        assert rejections[0].status_code == 409
+        assert rejections[0].reason == "already_used"
+
+        await client_a.aclose()
+        await client_b.aclose()
 
     async def test_unknown_token_yields_401_via_real_enrollment_client(
         self, mock_app, real_csr_pem

@@ -23,7 +23,11 @@ unauthenticated-by-design root-cert endpoint; Terraform cannot output the
 PEM directly since step-ca generates its root key/cert itself inside the
 running container, not via Terraform -- see `modules/ca/outputs.tf`'s
 comment) is where the value for that Secret's `ca_bundle.pem` key comes
-from, and
+from (**as written, that `curl` is not reachable directly against
+`step_ca_endpoint` without VPN/bastion access into the VPC -- see
+§4/HAZARD-STREAM-012 gap 1 for why, and `modules/roots-proxy` for the
+narrow public route that now resolves it; use `envs/dev`'s
+`roots_proxy_public_url` output instead for this step**), and
 `modules/provisioning-api`'s issued enrollment tokens (via whatever
 operator/fleet-management process calls it — not implemented in this pass,
 see §5) are the value that belongs in that Secret's `token` key. **This
@@ -115,18 +119,53 @@ Also documented as a code-adjacent docstring in `modules/ca/main.tf`
 never leaves step-ca's own process -- nothing in this Terraform handles
 it directly.
 
-**NOT mitigated -- two distinct gaps, surfaced while answering this
-hazard, not assumed away:**
-1. `/roots.pem` (step-ca's public root-cert endpoint) shares network
-   exposure with the CA's admin/signing/ACME API -- same port, same
-   security group, same internal-only NLB. This is currently
-   OVER-restricted to the point §1's documented bootstrap flow (an
-   operator running `curl .../roots.pem`) is not actually reachable
-   without separate VPN/bastion access into the VPC -- a real
-   inconsistency between what this document describes and what
-   `modules/ca`'s security group actually permits. Needs an explicit
-   decision (narrow public proxy for just that one path / require
-   bastion access / something else), not a silent fix.
+**Gap 1 RESOLVED, one gap remains NOT mitigated -- both surfaced while
+answering this hazard, neither assumed away:**
+1. **RESOLVED.** `/roots.pem` (step-ca's public root-cert endpoint) used
+   to share network exposure with the CA's admin/signing/ACME API -- same
+   port, same security group, same internal-only NLB -- which
+   OVER-restricted §1's documented bootstrap flow (an operator running
+   `curl .../roots.pem`) to the point it was not actually reachable
+   without separate VPN/bastion access into the VPC.
+
+   **Decision taken:** a narrow public-facing proxy for exactly that one
+   path, not bastion/VPN access as the intended channel and not any
+   change to `modules/ca`'s own NLB. See `modules/roots-proxy` — a
+   separate, public Application Load Balancer whose only listener rule
+   forwards `GET /roots.pem` (path AND method both required to match) to
+   a small Lambda that fetches that one path from `modules/ca`'s internal
+   NLB and returns it verbatim; every other request (wrong path, wrong
+   method, or both) hits the listener's `default_action`, a flat 403,
+   before ever reaching the Lambda. `modules/ca`'s own NLB, its listener,
+   and `aws_security_group.step_ca_task`'s ingress rule are all
+   byte-for-byte unchanged by this -- the new Lambda is added to
+   `allowed_client_security_group_ids` at the same trust level
+   `modules/provisioning-api`'s Lambdas already have (see
+   `envs/dev/main.tf`), not a new or broader one. Full reasoning in
+   `modules/roots-proxy/main.tf`'s header; `envs/dev/main.tf`'s MANUAL
+   BOOTSTRAP STEPS #7-9 cover its ACM cert, DNS, and — #9 specifically —
+   the manual verification runbook proving the admin/ACME/signing surface
+   is exactly as unreachable through this new public route as it always
+   was.
+
+   **Manual verification (repeated here, canonical copy is
+   `envs/dev/main.tf`'s step #9, since there is no `terraform`/cloud
+   account in this sandbox to assert this with an automated test
+   against):**
+   - `curl -i https://<roots_proxy_domain_name>/roots.pem` → `200`, PEM body.
+   - `curl -i -X POST https://<roots_proxy_domain_name>/roots.pem` → `403`
+     (ALB `default_action`; POST never reaches the Lambda).
+   - `curl -i https://<roots_proxy_domain_name>/1.0/sign` and
+     `.../1.0/provisioners` (step-ca's real ACME/admin paths) → `403` from
+     the same `default_action` -- these paths were never given a listener
+     rule at all, so nothing routes them anywhere.
+   - From outside the VPC, `curl https://<modules/ca's NLB DNS>:9000/...`
+     → connection timeout/refused -- `modules/ca`'s NLB is still
+     internal-only.
+   - Applied state/plan for `modules/ca` shows
+     `allowed_client_security_group_ids` containing only
+     `modules/provisioning-api`'s and `modules/roots-proxy`'s Lambda
+     security groups -- nothing broader was added.
 2. No fleet-wide CA-compromise recovery runbook exists: no
    re-issuance-at-scale process, no plan for physically-deployed edge
    appliances (real hospital hardware) that cannot promptly reach a
@@ -134,7 +173,8 @@ hazard, not assumed away:**
    beyond the per-device `reattest()` gaps HAZARD-STREAM-011 already
    documents. A device unable to re-enroll during such an event keeps
    operating on stale local data forwarding -- a clinical availability
-   concern, not just an infrastructure one.
+   concern, not just an infrastructure one. Still open -- not addressed
+   by this pass.
 
 ## 5. Explicitly NOT built in this pass
 
