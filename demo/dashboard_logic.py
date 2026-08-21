@@ -664,8 +664,8 @@ def build_whatif_payload(
     not be smuggled into a what-if comparison, or the comparison would be
     scoring data the pipeline already refused.
 
-    Both scales are sent to the REAL endpoint and scored by the REAL
-    validated NEWS2Calculator. This function performs no scoring itself --
+    Both scales are sent to the REAL endpoint and scored by the gateway's
+    own NEWS2Calculator. This function performs no scoring itself --
     it only reshapes readings the gateway already returned.
     """
     moment = (
