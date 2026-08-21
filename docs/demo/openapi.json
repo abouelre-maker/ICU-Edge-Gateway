@@ -1,0 +1,690 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "ICU Edge-to-FHIR Interoperability Gateway",
+    "description": "**SaMD Middleware** \u00e2\u20ac\u201d Transforms legacy ICU monitor data (HL7 v2.x) into FHIR R4 Bundles with embedded NEWS2 clinical scoring.\n\n**Regulatory:** IEC 62304 Class B \u00c2\u00b7 ISO 14971 \u00c2\u00b7 FDA CDS Non-Device Exemption \u00c2\u00b7 Health Canada Class II.\n\n**Standards:** HL7 FHIR R4 \u00c2\u00b7 LOINC \u00c2\u00b7 SNOMED CT \u00c2\u00b7 UCUM \u00c2\u00b7 RCP NEWS2 2017.",
+    "contact": {
+      "name": "Housam Abouelreish",
+      "url": "https://linkedin.com/in/housam-abouelreish-805352226"
+    },
+    "license": {
+      "name": "Proprietary \u00e2\u20ac\u201d IEC 62304 Class B SaMD"
+    },
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "Health"
+        ],
+        "summary": "Liveness & Readiness Probe",
+        "description": "Returns the current health status of the ICU Edge-to-FHIR Gateway. Used as Kubernetes liveness and readiness probe target. Returns HTTP 200 when fully operational.",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Gateway is healthy and processing requests.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Gateway is degraded \u00e2\u20ac\u201d consult components field."
+          }
+        }
+      }
+    },
+    "/api/v1/ingest": {
+      "post": {
+        "tags": [
+          "HL7 Ingestion"
+        ],
+        "summary": "Ingest Raw HL7 v2.x ORU^R01 Message",
+        "description": "Accepts a raw HL7 v2.x ORU^R01 message (text/plain body). Parses OBX segments, applies DSP artifact rejection, calculates NEWS2 score, and returns a FHIR R4 Bundle.\n\n**Patient ID** is extracted from PID-3 of the HL7 message.\n\n**SpO2 Scale:** Set `spo2_scale=SCALE_2` **only** for patients with confirmed hypercapnic respiratory failure (COPD type 2). Default is SCALE_1 for all other patients.",
+        "operationId": "ingest_hl7_api_v1_ingest_post",
+        "parameters": [
+          {
+            "name": "spo2_scale",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/SpO2Scale",
+              "description": "SpO2 scoring scale. SCALE_1 (default) = all patients. SCALE_2 = confirmed hypercapnic respiratory failure ONLY. ISO 14971 HAZARD-SPO2-001.",
+              "default": "SCALE_1"
+            },
+            "description": "SpO2 scoring scale. SCALE_1 (default) = all patients. SCALE_2 = confirmed hypercapnic respiratory failure ONLY. ISO 14971 HAZARD-SPO2-001."
+          },
+          {
+            "name": "encounter_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "FHIR Encounter logical ID. Populates Observation.encounter.",
+              "title": "Encounter Id"
+            },
+            "description": "FHIR Encounter logical ID. Populates Observation.encounter."
+          },
+          {
+            "name": "device_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "FHIR Device logical ID override. Auto-detected from MSH-3 if absent.",
+              "title": "Device Id"
+            },
+            "description": "FHIR Device logical ID override. Auto-detected from MSH-3 if absent."
+          },
+          {
+            "name": "device_vendor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/MonitorVendor"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Monitor vendor override. Auto-detected from MSH-3 if absent.",
+              "title": "Device Vendor"
+            },
+            "description": "Monitor vendor override. Auto-detected from MSH-3 if absent."
+          },
+          {
+            "name": "device_model",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Monitor model string (e.g., 'IntelliVue MX800').",
+              "title": "Device Model"
+            },
+            "description": "Monitor model string (e.g., 'IntelliVue MX800')."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "FHIR R4 Bundle (application/fhir+json)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              },
+              "application/fhir+json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Invalid HL7 message or missing required content."
+          },
+          "500": {
+            "description": "Unexpected internal error \u00e2\u20ac\u201d consult gateway logs."
+          }
+        },
+        "requestBody": {
+          "required": true,
+          "content": {
+            "text/plain": {
+              "schema": {
+                "type": "string",
+                "example": "MSH|^~\\&|MONITOR|ICU|EHR|HOSPITAL|20240115100000||ORU^R01|MSG001|P|2.5.1\rPID|1||PT-001^^^HOSP^MR\rOBX|1|NM|8867-4^Heart rate^LN||72|/min||||F"
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/vitals": {
+      "post": {
+        "tags": [
+          "Normalized Vitals"
+        ],
+        "summary": "Ingest JSON-Normalized Vital Signs",
+        "description": "Accepts a structured JSON payload of vital sign observations. Applies DSP artifact rejection, calculates NEWS2 score, and returns a FHIR R4 Bundle.\n\nUse this endpoint when the upstream system can produce normalized data directly (no HL7 parsing required). For raw HL7 v2.x messages, use `POST /api/v1/ingest` instead.",
+        "operationId": "ingest_vitals_api_v1_vitals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VitalsIngestionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "FHIR R4 Bundle (application/fhir+json)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation error \u00e2\u20ac\u201d missing fields or invalid values."
+          },
+          "500": {
+            "description": "Unexpected internal error."
+          }
+        }
+      }
+    },
+    "/api/v1/fhir/Subscription": {
+      "get": {
+        "tags": [
+          "FHIR Subscription"
+        ],
+        "summary": "Search FHIR R4 Subscriptions",
+        "description": "Returns every registered Subscription as a FHIR R4 searchset Bundle. No FHIR search parameters are implemented in this pass -- this always returns the full set (single-tenant appliance assumption; see infrastructure/fhir/subscription.py HAZARD-FHIR-004).",
+        "operationId": "list_subscriptions_api_v1_fhir_Subscription_get",
+        "responses": {
+          "200": {
+            "description": "FHIR R4 searchset Bundle.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid registration credentials."
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "FHIR Subscription"
+        ],
+        "summary": "Create a FHIR R4 Subscription",
+        "description": "Register a rest-hook Subscription. On creation this gateway POSTs the matching Bundle to `channel.endpoint` every time a Bundle is produced whose `criteria` matches. See infrastructure/fhir/subscription.py for the supported (non-general-FHIR-search) criteria subset.",
+        "operationId": "create_subscription_api_v1_fhir_Subscription_post",
+        "responses": {
+          "201": {
+            "description": "FHIR R4 Subscription (application/fhir+json), status=active.",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid registration credentials."
+          },
+          "422": {
+            "description": "Unsupported criteria, channel type, or unsafe endpoint."
+          }
+        }
+      }
+    },
+    "/api/v1/fhir/Subscription/{subscription_id}": {
+      "get": {
+        "tags": [
+          "FHIR Subscription"
+        ],
+        "summary": "Read a FHIR R4 Subscription",
+        "operationId": "read_subscription_api_v1_fhir_Subscription__subscription_id__get",
+        "parameters": [
+          {
+            "name": "subscription_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Subscription Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "FHIR R4 Subscription (application/fhir+json).",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "401": {
+            "description": "Missing or invalid registration credentials."
+          },
+          "404": {
+            "description": "No Subscription with this id."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "FHIR Subscription"
+        ],
+        "summary": "Cancel a FHIR R4 Subscription",
+        "operationId": "delete_subscription_api_v1_fhir_Subscription__subscription_id__delete",
+        "parameters": [
+          {
+            "name": "subscription_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Subscription Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Subscription deleted."
+          },
+          "401": {
+            "description": "Missing or invalid registration credentials."
+          },
+          "404": {
+            "description": "No Subscription with this id."
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AVPULevel": {
+        "type": "string",
+        "enum": [
+          "A",
+          "V",
+          "P",
+          "U",
+          "C"
+        ],
+        "title": "AVPULevel",
+        "description": "AVPU Scale \u00e2\u20ac\u201d Level of Consciousness.\n\nRCP NEWS2 2017: Any deviation from Alert \u00e2\u20ac\u201d including new confusion (C) \u00e2\u20ac\u201d\nscores 3 points regardless of cause.\nISO 14971 HAZARD-CON-001: Incorrect AVPU assignment causes NEWS2\nunderestimation. Mitigation: explicit enum prevents free-text encoding."
+      },
+      "ComponentHealth": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ComponentHealth",
+        "description": "Health status of a single internal component."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "HealthResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "uptime_seconds": {
+            "type": "number",
+            "title": "Uptime Seconds"
+          },
+          "timestamp": {
+            "type": "string",
+            "title": "Timestamp"
+          },
+          "components": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ComponentHealth"
+            },
+            "type": "object",
+            "title": "Components"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "version",
+          "uptime_seconds",
+          "timestamp",
+          "components"
+        ],
+        "title": "HealthResponse",
+        "description": "Liveness and readiness response payload.\n\nIEC 62304 \u00c2\u00a75.8: All fields are observable at runtime \u00e2\u20ac\u201d used by\nclinical IT monitoring dashboards to detect degraded service."
+      },
+      "MonitorVendor": {
+        "type": "string",
+        "enum": [
+          "PHILIPS",
+          "GE",
+          "DRAEGER",
+          "MINDRAY",
+          "NIHON_KOHDEN",
+          "GENERIC"
+        ],
+        "title": "MonitorVendor",
+        "description": "ICU monitor vendors whose HL7 v2.x dialects are explicitly supported.\n\nIEC 62304: SOUP declaration \u00e2\u20ac\u201d each vendor produces HL7 v2.x with\nnon-standard extensions. Parser behavior varies per vendor.\nISO 14971 HAZARD-PROTO-001: Unknown vendor \u00e2\u2020\u2019 GENERIC fallback parser;\nnon-standard OBX segments may be silently dropped."
+      },
+      "SpO2Scale": {
+        "type": "string",
+        "enum": [
+          "SCALE_1",
+          "SCALE_2"
+        ],
+        "title": "SpO2Scale",
+        "description": "NEWS2 defines two mutually exclusive SpO2 scoring scales.\n\nRCP NEWS2 2017 \u00c2\u00a72.4: Scale 2 MUST only be used for patients with a confirmed\ndiagnosis of hypercapnic respiratory failure (e.g., COPD type 2).\nA clinician must explicitly assign Scale 2 \u00e2\u20ac\u201d it must NEVER be inferred\nfrom SpO2 values alone.\n\nISO 14971 HAZARD-SPO2-001: Incorrect scale assignment is a patient safety\ndefect. Default is SCALE_1 to ensure conservative (higher) scoring."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "VitalSignPayload": {
+        "properties": {
+          "vital_sign_type": {
+            "$ref": "#/components/schemas/VitalSignType"
+          },
+          "value": {
+            "type": "number",
+            "title": "Value",
+            "description": "Numeric measurement value. For CONSCIOUSNESS type, set avpu_level instead \u00e2\u20ac\u201d value is ignored."
+          },
+          "unit": {
+            "$ref": "#/components/schemas/VitalSignUnit"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp",
+            "description": "ISO 8601 timestamp WITH timezone (e.g., '2024-01-15T10:00:00Z'). Naive timestamps are rejected. ISO 14971 HAZARD-TIME-001."
+          },
+          "avpu_level": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AVPULevel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Required when vital_sign_type is CONSCIOUSNESS. ISO 14971 HAZARD-CON-001: missing AVPU causes consciousness underestimation."
+          },
+          "waveform": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Waveform",
+            "description": "Optional raw waveform samples for DSP processing."
+          },
+          "sampling_rate_hz": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sampling Rate Hz",
+            "description": "Required when waveform is provided. Must be > 0."
+          },
+          "device_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id",
+            "description": "FHIR Device logical ID for this sample's source device."
+          }
+        },
+        "type": "object",
+        "required": [
+          "vital_sign_type",
+          "value",
+          "unit",
+          "timestamp"
+        ],
+        "title": "VitalSignPayload",
+        "description": "Single vital sign observation from a structured JSON source.\n\nIEC 62304 REQ-API-010: Pydantic validates types and formats before domain\ncode executes \u00e2\u20ac\u201d the domain layer receives only well-formed inputs."
+      },
+      "VitalSignType": {
+        "type": "string",
+        "enum": [
+          "HEART_RATE",
+          "RESPIRATORY_RATE",
+          "SPO2",
+          "SYSTOLIC_BP",
+          "DIASTOLIC_BP",
+          "TEMPERATURE_CELSIUS",
+          "CONSCIOUSNESS",
+          "SUPPLEMENTAL_O2"
+        ],
+        "title": "VitalSignType",
+        "description": "NEWS2-aligned vital sign identifiers.\n\nIEC 62304 REQ-VITAL-001: Each value maps to exactly one NEWS2 component\nin the RCP 2017 clinical algorithm (ISBN 978-1-86016-693-6).\nAdding a new value here requires a corresponding NEWS2Calculator update\nand a new traceability entry in regulatory/risk_register.xlsx."
+      },
+      "VitalSignUnit": {
+        "type": "string",
+        "enum": [
+          "bpm",
+          "breaths/min",
+          "%",
+          "mmHg",
+          "Cel",
+          "[degF]",
+          "bool",
+          "avpu"
+        ],
+        "title": "VitalSignUnit",
+        "description": "Clinical and SI units for FHIR UCUM encoding."
+      },
+      "VitalsIngestionRequest": {
+        "properties": {
+          "patient_id": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Patient Id",
+            "description": "FHIR Patient logical ID. Required for all FHIR resource references."
+          },
+          "samples": {
+            "items": {
+              "$ref": "#/components/schemas/VitalSignPayload"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Samples",
+            "description": "One or more vital sign observations. At least one is required."
+          },
+          "spo2_scale": {
+            "$ref": "#/components/schemas/SpO2Scale",
+            "description": "SpO2 scoring scale. SCALE_1 = standard (default for all patients). SCALE_2 = confirmed hypercapnic respiratory failure ONLY. ISO 14971 HAZARD-SPO2-001.",
+            "default": "SCALE_1"
+          },
+          "encounter_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Encounter Id",
+            "description": "FHIR Encounter logical ID."
+          },
+          "device_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Id",
+            "description": "FHIR Device logical ID."
+          },
+          "device_vendor": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MonitorVendor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source monitor vendor (for FHIR Device resource)."
+          },
+          "device_model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Model",
+            "description": "Source monitor model string."
+          },
+          "device_location": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Location",
+            "description": "Physical location (e.g., 'ICU-BED-07-A')."
+          }
+        },
+        "type": "object",
+        "required": [
+          "patient_id",
+          "samples"
+        ],
+        "title": "VitalsIngestionRequest",
+        "description": "Full vitals payload for POST /api/v1/vitals.\n\nIEC 62304 \u00c2\u00a75.2: Top-level request entity \u00e2\u20ac\u201d contains all clinical context\nrequired to execute the full domain pipeline."
+      }
+    }
+  }
+}
