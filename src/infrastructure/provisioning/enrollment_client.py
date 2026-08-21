@@ -183,6 +183,16 @@ class DeviceEnrollmentClient:
                     "connect to an unexpected host."
                 )
 
+        # `ca_bundle_path` is this device's root of trust for every mTLS
+        # connection it will ever make -- the fleet-wide blast radius of
+        # that trust (root CA private-key custody and compromise) is ISO
+        # 14971 HAZARD-STREAM-012, tracked at the infrastructure layer that
+        # actually runs the CA, not here: see
+        # infra/terraform/modules/ca/main.tf's module-header docstring for
+        # the full hazard record. This comment exists so a reader who finds
+        # HAZARD-STREAM-012 from the risk register (or from here) can reach
+        # the other side without a register-to-nowhere dead end -- this
+        # module does not re-derive or restate that analysis.
         self._client = http_client or httpx.AsyncClient(
             timeout=_DEFAULT_REQUEST_TIMEOUT_SECONDS,
             verify=ca_bundle_path if ca_bundle_path else True,

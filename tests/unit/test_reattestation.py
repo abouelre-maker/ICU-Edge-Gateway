@@ -117,6 +117,45 @@ class TestReattestOnce:
 
         assert os.path.exists(store.cert_path + ".revoked")
 
+    async def test_skips_when_key_present_but_no_certificate_at_all(
+        self, tmp_path
+    ) -> None:
+        """
+        Phase 5-Stream Section D edge case, distinct from
+        test_skips_when_no_valid_identity above (which uses a totally
+        fresh store -- no key, no cert): here the device's private key was
+        already generated (e.g. a prior process crashed or lost network
+        connectivity between key generation and receiving the issued
+        certificate from /enroll) but write_issued_credentials() was never
+        called, so device.crt does not exist at all.
+        cert_store.has_valid_identity() must still report False (see
+        test_cert_store.py::TestHasValidIdentity::
+        test_false_when_only_key_present for the unit-level guarantee this
+        relies on), and _reattest_once must still skip cleanly at the
+        orchestration level -- no mTLS client is ever built (there is no
+        certificate to present), no network call is attempted.
+        """
+        store = CertStore(str(tmp_path / "pki"))
+        store.load_or_generate_key()  # key exists...
+        assert not (tmp_path / "pki" / "device.crt").exists()  # ...cert does not
+
+        called = {"n": 0}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            called["n"] += 1
+            return httpx.Response(200)
+
+        await _reattest_once(
+            cert_store=store,
+            enrollment_client=_enrollment_client_that_reattests(handler),
+            mtls_client_factory=lambda: httpx.AsyncClient(
+                transport=httpx.MockTransport(handler)
+            ),
+        )
+
+        assert called["n"] == 0
+        assert store.has_valid_identity() is False
+
     async def test_network_error_is_skipped_not_quarantined(self, tmp_path) -> None:
         store = _store_with_valid_identity(tmp_path)
 
