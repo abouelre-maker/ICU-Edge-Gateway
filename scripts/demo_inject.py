@@ -337,6 +337,29 @@ _SEPSIS_STAGES: tuple[tuple[float, str, Vitals], ...] = (
 SEPSIS_LOOP_SECONDS: float = 90.0
 
 
+# ── One-shot clinical scenarios ─────────────────────────────────────────────
+# Cases the three continuous beds do not naturally produce, but which a
+# reviewing clinician will specifically ask to see.
+#
+# LOW_MEDIUM is the clinically subtle band and the reason NEWS2 has a
+# single-parameter escalation rule at all: a total of 3 looks reassuring, but
+# ANY single parameter scoring 3 escalates to 1-hourly observations and urgent
+# ward-clinician review regardless of how low the total is. RR 8 (the
+# "<= 8 breaths/min" band) with every other parameter normal produces exactly
+# that shape -- total 3, risk LOW_MEDIUM -- verified through the real
+# NEWS2Calculator, not asserted here.
+_SCENARIO_VITALS: dict[str, tuple[str, Vitals]] = {
+    "low-medium": (
+        "single-parameter-3 (RR 8) -> total 3, LOW_MEDIUM",
+        Vitals(8.0, 98.0, 120.0, 72.0, 37.0, False, "A"),
+    ),
+    "artifact": (
+        "out-of-bounds HR 450 -> rejected, NEWS2 withheld (HR is mandatory)",
+        Vitals(16.0, 98.0, 120.0, 450.0, 37.0, False, "A"),
+    ),
+}
+
+
 def sepsis_stage_at(progress: float) -> tuple[str, Vitals]:
     """
     Return the (stage_name, Vitals) in effect at `progress` in [0, 1).
@@ -739,6 +762,45 @@ async def _run_continuous(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _run_scenario(args: argparse.Namespace) -> int:
+    """
+    Send ONE message representing a named clinical scenario, then exit.
+
+    Deliberately one-shot rather than continuous: these scenarios exist to be
+    looked at on screen and screenshotted. Stop the continuous streamer first,
+    or it will overwrite the bed within one interval.
+    """
+    label, vitals = _SCENARIO_VITALS[args.scenario]
+    profile = next(
+        (p for p in BED_PROFILES if p.patient_id == args.scenario_patient),
+        BED_PROFILES[0],
+    )
+
+    print(f"[demo_inject] {BANNER}", file=sys.stderr)
+    print(f"[demo_inject] scenario '{args.scenario}': {label}", file=sys.stderr)
+    print(
+        f"[demo_inject] target {profile.bed_id} / {profile.patient_id} "
+        f"via {args.transport}",
+        file=sys.stderr,
+    )
+
+    if not await _await_gateway(args):
+        print("[demo_inject] FAILED: gateway not reachable.", file=sys.stderr)
+        return 1
+
+    message = build_oru_r01(profile, vitals, 0)
+    summary, headers = await _send_one(profile, message, args)
+    total = headers.get("x-news2-total")
+    risk = headers.get("x-news2-risk-level")
+    scored = (
+        f"NEWS2={total} {risk}"
+        if total is not None
+        else "NEWS2=(check the dashboard; MLLP ACK carries no score)"
+    )
+    print(f"[demo_inject] sent. {scored} ack={summary[:70]}", file=sys.stderr)
+    return 0
+
+
 def _build_parser() -> argparse.ArgumentParser:
     """
     CLI surface.
@@ -815,6 +877,20 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--scenario",
+        choices=tuple(_SCENARIO_VITALS),
+        default=None,
+        help=(
+            "Send ONE message for a named clinical scenario and exit. "
+            "Stop the continuous streamer first or it will overwrite the bed."
+        ),
+    )
+    parser.add_argument(
+        "--scenario-patient",
+        default=BED_PROFILES[0].patient_id,
+        help="Which bed the scenario targets (default: the first demo bed).",
+    )
+    parser.add_argument(
         "--no-observer",
         action="store_true",
         help="Do not open the live WebSocket to correlate NEWS2 back into the log.",
@@ -833,6 +909,13 @@ def main() -> int:
             args.http_port = args.port
         else:
             args.mllp_port = args.port
+
+    if args.scenario:
+        try:
+            return asyncio.run(_run_scenario(args))
+        except (TimeoutError, OSError) as exc:
+            print(f"[demo_inject] FAILED: {exc}", file=sys.stderr)
+            return 1
 
     if args.continuous:
         try:
