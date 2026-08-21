@@ -184,6 +184,41 @@ class TestCaPinningRejectsWrongOrSelfSignedCa:
 
 
 @pytest.mark.integration
+class TestCaPinningAgainstMalformedBundle:
+    """
+    Phase 5-Stream Section D edge case: the CA bundle FILE exists (unlike
+    a missing-file case, which httpx would report as a plain "file not
+    found" OSError before ever reaching TLS) but its CONTENTS are not
+    valid PEM -- e.g. truncated during a write, or an operator accidentally
+    pointed PROVISIONING_CA_BUNDLE_PATH at the wrong file. This must fail
+    closed at construction time (no client is silently built that would
+    fall back to permissive/system-default trust), not defer the failure
+    to the first request or -- worse -- succeed with the pin silently not
+    applied.
+    """
+
+    def test_construction_raises_on_malformed_pem_bundle(self, tmp_path) -> None:
+        bad_bundle = tmp_path / "not-actually-pem.pem"
+        bad_bundle.write_text("this is not a certificate\njust garbage text\n")
+
+        with pytest.raises(ssl.SSLError):
+            DeviceEnrollmentClient(
+                "https://control-plane.example.org",
+                ca_bundle_path=str(bad_bundle),
+            )
+
+    def test_construction_raises_on_empty_bundle_file(self, tmp_path) -> None:
+        empty_bundle = tmp_path / "empty.pem"
+        empty_bundle.write_text("")
+
+        with pytest.raises(ssl.SSLError):
+            DeviceEnrollmentClient(
+                "https://control-plane.example.org",
+                ca_bundle_path=str(empty_bundle),
+            )
+
+
+@pytest.mark.integration
 class TestExpectedHostnamePin:
     """
     Distinct, independent-of-TLS check: `expected_hostname` guards against

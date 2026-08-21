@@ -40,3 +40,13 @@ variable "iot_ca_verification_certificate_pem" {
   description = "See main.tf's MANUAL BOOTSTRAP STEPS #3."
   type        = string
 }
+
+variable "roots_proxy_domain_name" {
+  description = "e.g. \"roots.control-plane.example.org\" -- see main.tf's MANUAL BOOTSTRAP STEPS #8. Distinct from provisioning_domain_name; this is the narrow public GET /roots.pem route only (HAZARD-STREAM-012 gap 1, DESIGN.md §4)."
+  type        = string
+}
+
+variable "roots_proxy_acm_certificate_arn" {
+  description = "See main.tf's MANUAL BOOTSTRAP STEPS #7. A normal publicly-trusted ACM cert -- does NOT need to be CA-issued like provisioning_acm_certificate_arn."
+  type        = string
+}
