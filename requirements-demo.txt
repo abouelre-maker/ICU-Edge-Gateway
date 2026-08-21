@@ -1,0 +1,49 @@
+# ── ICU Edge Gateway — DEMONSTRATION LAYER ONLY ────────────────────────────
+#
+# NOT SaMD. NOT part of the IEC 62304 Class B software item. These packages
+# MUST NEVER be installed into the production container image: the Dockerfile
+# installs requirements.txt only, and .dockerignore excludes demo/ and this
+# file. Nothing here is SOUP under IEC 62304 §8.1.2, because none of it
+# executes in the medical device.
+#
+# ── INSTALL INTO A SEPARATE VENV, NOT venv311 ──────────────────────────────
+#
+# streamlit declares `websockets<17,>=12.0.0`, while the gateway's
+# requirements.txt pins `websockets==17.0.1` (a production runtime
+# dependency of the FHIR Subscription and live-dashboard paths). Those two
+# constraints are mutually unsatisfiable, so installing Streamlit into the
+# validated environment SILENTLY DOWNGRADES websockets and leaves the
+# production/test venv no longer matching its own pin file.
+#
+# That is exactly the failure mode HAZARD-STREAM-013 was raised for
+# (unpinned/drifting dependency resolution causing a CI failure that took a
+# day to diagnose), so the demo layer gets its own interpreter environment
+# instead of bending the production pin for a demonstration tool:
+#
+#     python -m venv venv-demo
+#     venv-demo/Scripts/python -m pip install -r requirements-demo.txt   # Windows
+#     venv-demo/bin/python     -m pip install -r requirements-demo.txt   # POSIX
+#
+# venv311 stays at the pinned production set and is what runs pytest.
+# venv-demo runs `streamlit run demo/dashboard.py` and nothing else.
+# run_demo.bat / run_demo.sh create and use both automatically.
+#
+# Versions below are the exact resolution verified on Python 3.11.9
+# (matching the CI pin) on 2026-08-21.
+
+# Dashboard UI framework.
+streamlit==1.62.0
+
+# Trend and NEWS2 component charts.
+plotly==6.9.0
+
+# Required by streamlit at runtime; not used directly by demo/dashboard.py.
+pandas==3.0.5
+
+# WebSocket client for WS /api/v1/live/vitals.
+# NOTE the version difference from requirements.txt's websockets==17.0.1 --
+# this is the newest release satisfying streamlit's `websockets<17`, and is
+# the entire reason this layer needs its own venv (see above). The dashboard
+# is a read-only consumer of the live channel, so the older client is
+# acceptable HERE; it is NOT acceptable in the gateway itself.
+websockets==16.1.1
