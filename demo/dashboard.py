@@ -15,7 +15,7 @@ asserts the file is absent from the built image.
 
 FDA CDS: This dashboard is a DISPLAY of the gateway's advisory-only output.
 It computes no clinical value. Every NEWS2 total, component sub-score, risk
-level and escalation shown here was produced by the gateway's validated
+level and escalation shown here was produced by the gateway's
 NEWS2Calculator and is read verbatim from the FHIR R4 Bundle. Nothing on
 this screen is derived, recomputed, rounded, or adjusted for presentation.
 
@@ -518,7 +518,7 @@ def _render_scale_panel(state: BedState) -> None:
     st.markdown("---")
     st.subheader("SpO2 Scale 1 vs Scale 2 — what-if analysis")
     st.caption(
-        "Both scores below are recomputed by the gateway's validated NEWS2 "
+        "Both scores below are recomputed by the gateway's own NEWS2 "
         "calculator via POST /api/v1/vitals — this is not a display "
         "transform. ISO 14971 HAZARD-SPO2-001: scale assignment is a "
         "clinician decision and must NEVER be inferred from SpO2 values. "
