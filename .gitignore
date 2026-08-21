@@ -46,7 +46,11 @@ Thumbs.db
 # ── Local scratch / non-source artifacts (untracked, not part of the codebase) ──
 # These were found sitting at repo root outside version control; ignored rather
 # than deleted per session decision on 2026-08-09. Not reviewed for content.
-ICU-Edge-Gateway_Pitch_Deck.pptx
+# Commercial pitch-deck binaries. v1 was already excluded by exact
+# filename; generalized so successive revisions follow the same rule
+# rather than each needing a new line (and rather than a large binary
+# with no meaningful diff landing in history).
+ICU-Edge-Gateway_Pitch_Deck*.pptx
 ICU_Edge_Gateway_Risk_Register_2.xlsx
 # Timestamped snapshots of the same register (e.g. .backup-20260810c-pre-interim-signoff.xlsx)
 # carry the same "no git-based recovery net desired" intent as the line above — extended here
