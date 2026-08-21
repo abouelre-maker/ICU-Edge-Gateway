@@ -11,3 +11,10 @@ mypy==1.7.1
 bandit==1.7.6
 pip-audit==2.6.1
 types-python-dateutil==2.8.19.14
+openapi-spec-validator==0.9.0
+# Used by scripts/demo_inject.py to receive the live-dashboard WS delta
+# (WS /api/v1/live/vitals) during scripts/demo_run.sh. Already an
+# incidental transitive dependency of uvicorn's ASGI websocket support
+# (requirements.txt); pinned explicitly here so the demo script's own
+# dependency is not left implicit.
+websockets==17.0.1
