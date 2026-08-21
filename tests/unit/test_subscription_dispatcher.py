@@ -150,6 +150,50 @@ class TestFailedDelivery:
 
         await dispatcher.aclose()
 
+
+class TestHazardDsp007NonFiniteBundleNeverDelivered:
+    """
+    ISO 14971 HAZARD-DSP-007 defense-in-depth: json.dumps(bundle,
+    allow_nan=False) in _deliver() must raise on a non-finite value BEFORE
+    the network call, recording a delivery failure (so the subscription's
+    consecutive-error tracking still sees it) without ever POSTing a
+    corrupted payload to the subscriber's endpoint.
+    """
+
+    def _bundle_with_nan_value(self, patient_id: str = "PT-NAN-001") -> dict:
+        bundle = _bundle(patient_id)
+        bundle["entry"][0]["resource"]["valueQuantity"] = {
+            "value": float("nan"),
+            "unit": "%",
+        }
+        return bundle
+
+    async def test_non_finite_bundle_is_never_posted_to_subscriber(self) -> None:
+        received: list[httpx.Request] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            received.append(request)
+            return httpx.Response(200)
+
+        registry = SubscriptionRegistry()
+        sub = registry.create(_subscription())
+        dispatcher = SubscriptionDispatcher(
+            registry=registry,
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        )
+
+        await dispatcher.dispatch(self._bundle_with_nan_value())
+        await _wait_until(lambda: sub.consecutive_delivery_errors == 1)
+
+        assert received == [], (
+            "A bundle containing NaN must never reach the subscriber's "
+            "endpoint -- json.dumps(allow_nan=False) must raise before the "
+            "POST is attempted."
+        )
+        assert sub.last_error is not None and "not JSON-serializable" in sub.last_error
+
+        await dispatcher.aclose()
+
     async def test_no_redelivery_after_failure_hazard_stream_008(self) -> None:
         """
         HAZARD-STREAM-008: a failed delivery is attempted once and NOT

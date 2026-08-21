@@ -139,10 +139,30 @@ class SubscriptionDispatcher:
         log = _log.bind(
             subscription_id=subscription.id, endpoint=subscription.channel.endpoint
         )
+
+        # ISO 14971 HAZARD-DSP-007 defense-in-depth policy (explicit, not a
+        # relied-upon framework default -- see mqtt_publisher.py's identical
+        # policy comment for the full reasoning): plain json.dumps()
+        # defaults to allow_nan=True and would otherwise SILENTLY POST a
+        # non-RFC-8259-compliant bare `NaN`/`Infinity` token to this
+        # subscriber's webhook endpoint -- potentially a hospital's own EHR
+        # integration -- with no error and no indication anything was
+        # wrong. Checked BEFORE the network call so a permanently-invalid
+        # Bundle never even reaches the subscriber, and is distinguished
+        # from an ordinary delivery failure below (this is a data-integrity
+        # defect, not the subscriber being unreachable).
+        try:
+            payload = json.dumps(bundle, allow_nan=False)
+        except ValueError as exc:
+            error = f"Bundle not JSON-serializable: {exc}"
+            self._registry.record_delivery_failure(subscription.id, error)
+            log.error("subscription_dispatcher.bundle_not_json_serializable", error=error)
+            return
+
         try:
             response = await self._client.post(
                 subscription.channel.endpoint,
-                content=json.dumps(bundle),
+                content=payload,
                 headers=headers,
                 timeout=self._timeout_seconds,
             )
