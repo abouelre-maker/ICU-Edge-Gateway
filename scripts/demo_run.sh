@@ -61,24 +61,93 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 1
 fi
 
-if [[ -x "$REPO_ROOT/venv/Scripts/python.exe" ]]; then
-    PYTHON_BIN="$REPO_ROOT/venv/Scripts/python.exe"
-elif [[ -x "$REPO_ROOT/venv/bin/python" ]]; then
-    PYTHON_BIN="$REPO_ROOT/venv/bin/python"
-elif command -v python3 >/dev/null 2>&1; then
-    PYTHON_BIN="python3"
-elif command -v python >/dev/null 2>&1; then
-    PYTHON_BIN="python"
+# ── Interpreter selection ────────────────────────────────────────────────
+#
+# DEFECT FIX (recorded in PUSH_READINESS.md): this block previously PROBED
+# for a bare `$REPO_ROOT/venv`, then fell back to whatever `python3` or
+# `python` happened to be on PATH. All of those are git-ignored and
+# unpinned, so the demo could -- and on the development machine
+# demonstrably did -- run against an interpreter that is not the CI-pinned
+# one: a 3.13.1 `venv/` had already drifted to uvicorn 0.52.1 against
+# venv311's 0.52.3. That is the HAZARD-STREAM-013 silent-pin-drift class.
+# There is now no probe and no fallback -- the interpreter is venv311 by
+# absolute path, or this script fails loudly.
+#
+# NOTE on venv-demo: this is the DOCKER demo. The gateway runs in a
+# container; the only local interpreter need is the MLLP injector client.
+# This script never launches Streamlit, so it does not require venv-demo,
+# and hard-failing on its absence would block a working demo for no safety
+# gain. venv-demo is therefore verified only if it EXISTS -- which still
+# catches drift, without inventing a dependency this script does not have.
+# The launcher that does start the dashboard, run_demo.bat, gates it hard.
+
+if [[ -x "$REPO_ROOT/venv311/Scripts/python.exe" ]]; then
+    PYTHON_BIN="$REPO_ROOT/venv311/Scripts/python.exe"
+elif [[ -x "$REPO_ROOT/venv311/bin/python" ]]; then
+    PYTHON_BIN="$REPO_ROOT/venv311/bin/python"
 else
-    echo "ERROR: no Python interpreter found on PATH." >&2
+    echo "ERROR: venv311 not found at $REPO_ROOT/venv311." >&2
+    echo "       This script requires the CI-pinned interpreter and will NOT" >&2
+    echo "       fall back to any other Python. Create it with:" >&2
+    echo "         python -m venv venv311" >&2
+    echo "         venv311/Scripts/python -m pip install -r requirements.txt -r requirements-dev.txt" >&2
+    exit 1
+fi
+
+# ── venv311 pin assertions (parity with run_demo.bat) ────────────────────
+
+if ! "$PYTHON_BIN" -c "import sys; sys.exit(0 if sys.version_info[:2]==(3,11) else 1)" >/dev/null 2>&1; then
+    echo "ERROR: venv311 is not Python 3.11.x (found: $("$PYTHON_BIN" --version 2>&1))." >&2
+    echo "       CI pins 3.11 (.github/workflows/ci.yml PYTHON_VERSION). A run on" >&2
+    echo "       any other interpreter resolves a different dependency graph and" >&2
+    echo "       is not comparable to the 816 passed / 1 xfailed baseline." >&2
     exit 1
 fi
 
 if ! "$PYTHON_BIN" -c "import websockets" >/dev/null 2>&1; then
-    echo "ERROR: the 'websockets' package is not importable via $PYTHON_BIN." >&2
-    echo "Install dev dependencies: $PYTHON_BIN -m pip install -r requirements-dev.txt" >&2
+    echo "ERROR: venv311 is missing 'websockets'." >&2
+    echo "       Install: $PYTHON_BIN -m pip install -r requirements.txt -r requirements-dev.txt" >&2
     exit 1
 fi
+
+if ! "$PYTHON_BIN" -c "import sys,websockets; sys.exit(0 if int(websockets.__version__.split('.')[0])>=17 else 1)" >/dev/null 2>&1; then
+    echo "ERROR: venv311 has websockets < 17. The production pin is websockets==17.0.1." >&2
+    echo "       Installing streamlit into venv311 does exactly this. Recreate it" >&2
+    echo "       from requirements.txt." >&2
+    exit 1
+fi
+
+if "$PYTHON_BIN" -c "import streamlit" >/dev/null 2>&1; then
+    echo "ERROR: venv311 unexpectedly contains 'streamlit'." >&2
+    echo "       The two environments have been cross-contaminated. streamlit" >&2
+    echo "       requires websockets<17; the gateway pins websockets==17.0.1." >&2
+    echo "       See requirements-demo.txt." >&2
+    exit 1
+fi
+
+# ── venv-demo: not used here; verified only if present (see NOTE above) ──
+
+DEMO_PY=""
+if [[ -x "$REPO_ROOT/venv-demo/Scripts/python.exe" ]]; then
+    DEMO_PY="$REPO_ROOT/venv-demo/Scripts/python.exe"
+elif [[ -x "$REPO_ROOT/venv-demo/bin/python" ]]; then
+    DEMO_PY="$REPO_ROOT/venv-demo/bin/python"
+fi
+
+if [[ -n "$DEMO_PY" ]]; then
+    if ! "$DEMO_PY" -c "import streamlit" >/dev/null 2>&1; then
+        echo "ERROR: venv-demo exists but is missing 'streamlit'." >&2
+        echo "       Recreate it from requirements-demo.txt." >&2
+        exit 1
+    fi
+    if ! "$DEMO_PY" -c "import sys,websockets; sys.exit(0 if int(websockets.__version__.split('.')[0])<17 else 1)" >/dev/null 2>&1; then
+        echo "ERROR: venv-demo does not satisfy websockets<17, which streamlit" >&2
+        echo "       requires. Recreate it from requirements-demo.txt." >&2
+        exit 1
+    fi
+fi
+
+echo "Interpreter: $PYTHON_BIN ($("$PYTHON_BIN" --version 2>&1))"
 
 LOG_CAPTURE_FILE="$(mktemp)"
 LOG_PID=""
