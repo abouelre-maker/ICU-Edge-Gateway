@@ -33,7 +33,6 @@ _SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(_SCRIPT_DIR))
 
 import websockets  # noqa: E402
-
 from demo_inject import _oru_message, _send_mllp  # noqa: E402
 
 _MESSAGE_COUNT = 100
