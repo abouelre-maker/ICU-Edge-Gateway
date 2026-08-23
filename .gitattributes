@@ -4,3 +4,17 @@
 # container (`/bin/sh^M: bad interpreter`). Force LF for shell scripts
 # regardless of the checking-out OS/git config.
 *.sh text eol=lf
+
+# Phase 9 (2026-08-23): core.autocrlf=true was rewriting the working copy of
+# every source/doc/config file to CRLF on checkout. The blobs are LF and git's
+# clean filter reversed it, so `git status` stayed clean -- but any tool that
+# compares raw worktree bytes against blob bytes reports the whole tree as
+# changed, which is alarming and wastes review time. Pin LF explicitly so the
+# working copy matches what is stored.
+*.py   text eol=lf
+*.md   text eol=lf
+*.json text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.txt  text eol=lf
+*.toml text eol=lf
