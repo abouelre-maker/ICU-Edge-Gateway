@@ -23,15 +23,15 @@ Nothing pushed.
 
 | Claim | Evidence | Verified how |
 |---|---|---|
-| **816 automated tests passing, 1 xfailed** | Full suite | `pytest -q`, three consecutive runs |
+| **816 automated tests passing, 1 xfailed** | Full suite | `pytest -q` / `pytest --cov=src`, re-run 2026-08-23 on venv311. **LOCAL-ONLY — not yet CI-confirmed.** CI has never executed the pytest step: it was skipped on 2026-08-23 when pip-audit failed ahead of it, and the last CI run that reached pytest (`94cbe08`, 2026-08-14) failed it with the since-fixed HAZARD-DSP-007 NaN defects. Do not describe this number as CI-verified until a CI run actually runs it |
 | **95% statement coverage of `src/`** | 2302 statements, 124 missed | `pytest --cov` |
 | **Zero-regression discipline across six phases** | 667 → 709 → 744 → 816, baseline held at every gate | Recorded per phase |
-| **Static analysis clean** | `ruff check .` clean repo-wide; `mypy src` success across 46 files | CI-equivalent local run |
+| **Static analysis clean** | `ruff check .` clean repo-wide; `mypy src` success across 46 files; Bandit clean at severity floor `low` | Local run **and CI-confirmed 2026-08-23** on commit `74a6a02` — [run](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32631860663): Ruff, Mypy and Bandit steps all green on a clean ubuntu-latest runner |
 | Real-time **HL7 v2.5.1 ORU^R01** ingestion over **MLLP** (VT/FS/CR framing, 1 MiB cap, AA/AE ACK, malformed message NAKs without dropping the connection) | `mllp_listener.py` + integration tests | Driven live with real framed messages |
 | **Multi-vendor normalization** — Philips proprietary OBX codes, GE with LOINC, Dräger — three beds concurrently, no per-vendor configuration | 3-bed streamer through the live listener | Observed live on the bed wall |
 | **Deterministic RCP 2017 NEWS2**, all seven parameters, every scoring boundary tested at the exact threshold — including the non-monotonic 41–50 bpm band and both SpO2 scales | `test_news2_calculator.py`, `test_news2_safety.py` | Parametrized boundary tests |
 | **FHIR R4 Bundle** output with a NEWS2 Observation coded **SNOMED CT 1239842005**, seven `component[]` sub-scores with dual LOINC + SNOMED coding and UCUM units | `news2_builder.py`, conformance tests | Captured from a running gateway |
-| **100 messages through MLLP: 100/100 ACKs, 100/100 Bundles carrying a NEWS2 Observation, 100/100 WebSocket frames, zero drops** | End-to-end smoke test | **Re-run 2026-08-22T20:23:31Z and retained: [`docs/demo/evidence/mllp_smoke_100.txt`](../docs/demo/evidence/mllp_smoke_100.txt)** (run tag SMOKE1787430202, venv311 / Python 3.11.9). 100 sent · 100/100 ACKs, all `MSA|AA` · 100/100 Bundles with a NEWS2 Observation · 100 WS deltas, 100/100 matched to this run · 0 drops. The same artifact records the emitted `Observation.note[].text` and an explicit `'880.3780' present: False` check, evidencing REG-CITATION-001 E1. **Round-trip timings in this artifact are p50 63 ms / p95 156 ms — a loaded-machine run, not the idle-laptop figures in the row below. Do not mix the two.** |
+| **100 messages through MLLP: 100/100 ACKs, 100/100 Bundles carrying a NEWS2 Observation, 100/100 WebSocket frames, zero drops** | End-to-end smoke test | **Re-run 2026-08-22T20:23:31Z and retained: [`docs/demo/evidence/mllp_smoke_100.txt`](../docs/demo/evidence/mllp_smoke_100.txt)** (run tag SMOKE1787430202, venv311 / Python 3.11.9). 100 sent · 100/100 ACKs, all `MSA\|AA` · 100/100 Bundles with a NEWS2 Observation · 100 WS deltas, 100/100 matched to this run · 0 drops. The same artifact records the emitted `Observation.note[].text` and an explicit `'880.3780' present: False` check, evidencing REG-CITATION-001 E1. **Round-trip timings in this artifact are p50 63 ms / p95 156 ms — a loaded-machine run, not the idle-laptop figures in the row below. Do not mix the two.** |
 | **Pipeline processing time 0.22–0.70 ms** (`X-Pipeline-Duration-Ms`); **MLLP round-trip p50 46 ms / p95 65 ms on an idle developer laptop**, p50 ~150 ms / p95 ~390 ms under concurrent load | Instrumented measurement | Measured live — **always quote with the conditions** |
 | **Deterioration detection demonstrated end-to-end**: NEWS2 0 NORMAL → 3 LOW → 6 MEDIUM → 7 HIGH → 17 HIGH | Sepsis scenario through the real pipeline | Observed live, screenshotted |
 | **The single-parameter rule made visible**: two beds at an identical total of 3 render differently — one `LOW-MEDIUM` (amber, "minimum 1-hourly observations", driven by RR 8 scoring 3) and one `LOW` (green, "minimum 12-hourly"). Same number, different escalation | Purpose-built scenario | Observed live, screenshot 07 |
@@ -42,7 +42,9 @@ Nothing pushed.
 | **Advisory-only posture enforced in the transport itself**, not only in documentation: `X-CDS-Advisory-Only: true` response header, a FHIR extension, and a Bundle note on every response | API + FHIR layer, asserted by tests | Integration tests |
 | **Resilience**: disconnect detected, cards dimmed with true data age, automatic reconnect without restart; bounded per-client queue (200, drop-oldest, logged); store-and-forward ring buffer (10,000) for WAN outage | Live kill-and-recover test | Observed live, screenshotted |
 | **API contract stability**: 0 paths added, 0 removed; `/health`, `/api/v1/ingest`, `/api/v1/vitals` byte-identical to the committed spec across all demo-layer work | OpenAPI diff | Automated comparison |
-| **Demonstration layer is architecturally excluded from the medical device**: the dashboard lives outside `src/`, `.dockerignore` keeps it out of the image, and a CI assertion enforces it | Structural + workflow | Design decision; CI assertion **written but not yet executed** |
+| **Demonstration layer is architecturally excluded from the medical device — machine-enforced, now EXECUTED**: inside the built image `/app/demo` is absent, as are `/app/requirements-demo.txt`, `/app/run_demo.sh`, `/app/run_demo.bat`, `/app/scripts`, `/app/tests`; and `streamlit`, `plotly`, `pandas`, `altair`, `pydeck` are all non-importable | `docker-verify.yml`, step "Assert the demonstration layer is ABSENT from the image" | **CI-confirmed 2026-08-23 on commit `74a6a02`** — [run](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32631860667) (pull_request) and [run](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32631858092) (push), both green |
+| **The production image runs as non-root**: `uid=1001 gid=1001` | `docker-verify.yml`, step "Assert the container runs as UID 1001" | **CI-confirmed 2026-08-23** — [run](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32631860667). Quote the UID, not a security posture |
+| **The image boots and self-reports healthy**: container accepting connections after **5 s**, Docker `HEALTHCHECK` reaching `healthy` after **2 s**; `GET /health` returns 200 with all four components healthy, and `POST /api/v1/ingest` returns 200 with `X-CDS-Advisory-Only: true`, media type `application/fhir+json`, and a **9-entry Bundle** containing the NEWS2 Observation | `docker-verify.yml` runtime assertions | **CI-confirmed 2026-08-23** — [run](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32631860667). These are ubuntu-latest GitHub-runner timings; quote them with that condition |
 
 **Numbers to quote exactly:** 816 tests / 1 xfailed · 95% coverage · NEWS2 0→3→6→7→17 · Scale 2 = 2 LOW
 vs Scale 1 = 5 MEDIUM (+3) · 100/100 zero drops · pipeline 0.22–0.70 ms · SNOMED CT 1239842005 ·
@@ -61,7 +63,7 @@ HL7 v2.5.1 · FHIR R4.
 | "Health Canada Class II" | Self-classification. No licence, no submission | A Medical Device Licence application |
 | "Clinically validated" | **Zero real patient data. Zero traffic from a real monitor.** Every message so far is synthetic. The regulatory tests prove conformance to the RCP 2017 *specification* — a different and lesser claim | A pilot on real HL7 traffic, then a retrospective accuracy study |
 | "Production-ready" | No deployment has happened. TLS/mTLS, authn/z, CORS lock-down (currently `allow_origins=["*"]`), persistence and audit-log retention are all absent | Deploy it somewhere real under those controls |
-| Any Docker figure — image size, layer count, boot time, non-root operation | **The image has never been built.** Docker is absent from the dev machine; `docker-verify.yml` has never executed. Its YAML was validated, nothing more | Push the branch and let CI run |
+| **Image size and layer count** | Still unquotable. The image now builds in CI, but `docker-verify.yml` writes size and layer count only to `$GITHUB_STEP_SUMMARY`, never to stdout, so neither figure has been read out yet. Boot time, non-root operation and the demo-layer exclusion have moved to §1 and are quotable | Read them off the run's web summary, or let `ci.yml`'s `docker-build` job run — it echoes the size to stdout, and was skipped on 2026-08-23 only because the quality gate failed ahead of it |
 | Throughput at ICU density | Never load-tested beyond a single laptop | A load test with published methodology |
 | Cloud deployment | Terraform is committed but **never applied**; no AWS credentials, no `terraform plan` | `terraform apply` against a real account |
 | "`run_demo.bat` works" | Only its guard logic was exercised. The success path is untested on Windows | Run it end to end once |
@@ -105,6 +107,17 @@ buyers in this market are unusually receptive to it.
 5. One timing-sensitive async test (`test_failed_item_is_requeued_not_dropped`, FLAKE-MQTT-001) failed
    once under CPU contention and passed on every subsequent run. Recorded and left unexplained rather
    than silenced by loosening the assertion.
+6. **`pytest==7.4.4` carries `PYSEC-2026-1845` (fixed in 9.0.3), and the test toolchain still runs it.**
+   On 2026-08-23 the pin was removed from `requirements.txt`, where it never belonged — pytest is a
+   test-only tool, it is absent from the production image (CI confirms `/app/tests` is not in the
+   image and the Dockerfile copies only `src/`), so it is not production SOUP. That unblocks
+   `pip-audit --requirement requirements.txt`. **It does not remediate the advisory:**
+   `requirements-dev.txt` still pins `pytest==7.4.4`, CI installs that file, and the vulnerable
+   version is therefore still what runs the suite — it is simply no longer *scanned*, because the
+   scan is scoped to production requirements. Do not present the green pip-audit as "the CVE is
+   fixed". The honest statement is that it was moved out of production scope and remains open in the
+   development toolchain. Upgrading to pytest 9.x is a separate change that would need the full suite
+   re-verified against it.
 
 ---
 

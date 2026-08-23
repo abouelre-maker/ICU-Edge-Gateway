@@ -29,6 +29,40 @@ was regenerated in this session — see §4.
 
 ---
 
+## 1a. UPDATE — CI has now run (2026-08-23, commit `74a6a02`)
+
+This document was written before the first push. Both workflows have since executed.
+This section supersedes the forward-looking language below where the two disagree.
+
+| Workflow | Result |
+|---|---|
+| [Docker Verify — pull_request](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32631860667) | **success** |
+| [Docker Verify — push](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32631858092) | **success** |
+| [CI — Quality Gate](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32631860663) | **failure at `pip-audit`** |
+
+**Now verified, and moved into §1 of the claims sheet:** the demonstration layer is absent
+from the built image (`/app/demo` plus five further paths, and `streamlit` / `plotly` /
+`pandas` / `altair` / `pydeck` all non-importable); the container runs as `uid=1001
+gid=1001`; it accepts connections after 5 s with `HEALTHCHECK` healthy after 2 s;
+`GET /health` returns 200 with all four components healthy; `POST /api/v1/ingest` returns
+200 with `X-CDS-Advisory-Only: true`, `application/fhir+json`, and a 9-entry Bundle
+carrying the NEWS2 Observation. Ruff, Mypy and Bandit are green on a clean runner.
+
+**Still NOT verified.** *Image size and layer count* remain unquotable: `docker-verify.yml`
+writes them only to `$GITHUB_STEP_SUMMARY`, never to stdout, so they are not in the log.
+`ci.yml`'s `docker-build` job does echo the size to stdout, but it was **skipped** because
+the quality gate failed ahead of it.
+
+**The CI failure is not a regression from this branch.** All three runs to date failed at a
+*different* step — `89b0227` at Bandit, `94cbe08` at pytest (the since-fixed HAZARD-DSP-007
+NaN defects), and `74a6a02` at pip-audit. pip-audit *passed* on `94cbe08` nine days earlier
+against the same unchanged `pytest==7.4.4` pin; `PYSEC-2026-1845` was published in between.
+
+**`pytest` was skipped in every CI run so far**, so the 816 / 1 xfailed figure remains
+**local-only** and must not be described as CI-confirmed until a run actually executes it.
+
+---
+
 ## 2. What CI will verify once this is pushed
 
 Two workflows fire. Neither has ever executed on this branch.
