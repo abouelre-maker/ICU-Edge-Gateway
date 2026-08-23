@@ -1,0 +1,41 @@
+==========================================================================
+MLLP 100-MESSAGE SMOKE TEST — RAW EVIDENCE
+==========================================================================
+UTC timestamp        : 2026-08-22T20:23:31Z
+Run tag              : SMOKE1787430202
+Gateway MLLP         : 127.0.0.1:2575
+Gateway WS           : ws://127.0.0.1:8000/api/v1/live/vitals
+Interpreter          : 3.11.9 (C:\Users\HUAWEI\Desktop\Projects\ICU-Edge-Gateway\venv311\Scripts\python.exe)
+
+Messages sent        : 100
+MLLP ACKs received   : 100 / 100
+ACKs with MSA|AA     : 100 / 100
+WS delta frames      : 100
+  matching this run  : 100 / 100
+Bundles w/ NEWS2 Obs : 100 / 100
+Drops (no delta)     : 0
+
+Send loop elapsed    : 7.80s
+MLLP send->ACK  p50  : 63.0 ms
+MLLP send->ACK  p95  : 156.0 ms
+MLLP send->ACK  max  : 281.0 ms
+
+NEWS2 Observation.note[].text as actually emitted (distinct values):
+  'NEWS2 score calculated per RCP 2017 guidelines. This is a clinical decision support advisory output only. Independent clinician review is required before any action.'
+
+Citation check — '880.3780' present in any emitted note: False
+
+--------------------------------------------------------------------------
+PER-MESSAGE ACK DETAIL (first 5 and last 5)
+--------------------------------------------------------------------------
+PT-SMOKE1787430202-001  ACK='MSA|AA|ACK20260822202322|'
+PT-SMOKE1787430202-002  ACK='MSA|AA|ACK20260822202323|'
+PT-SMOKE1787430202-003  ACK='MSA|AA|ACK20260822202323|'
+PT-SMOKE1787430202-004  ACK='MSA|AA|ACK20260822202323|'
+PT-SMOKE1787430202-005  ACK='MSA|AA|ACK20260822202323|'
+PT-SMOKE1787430202-096  ACK='MSA|AA|ACK20260822202330|'
+PT-SMOKE1787430202-097  ACK='MSA|AA|ACK20260822202330|'
+PT-SMOKE1787430202-098  ACK='MSA|AA|ACK20260822202330|'
+PT-SMOKE1787430202-099  ACK='MSA|AA|ACK20260822202330|'
+PT-SMOKE1787430202-100  ACK='MSA|AA|ACK20260822202330|'
+==========================================================================

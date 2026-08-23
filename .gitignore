@@ -6,6 +6,9 @@ __pycache__/
 # ── Testing / Coverage ─────────────────────────────────────────────────
 .coverage
 .coverage.*
+# `pytest --cov-report=xml` output (CLAUDE.md §3 / CI quality gate).
+# A build artifact regenerated on every run -- never source of truth.
+coverage.xml
 htmlcov/
 .pytest_cache/
 .ruff_cache/
@@ -16,6 +19,16 @@ venv/
 .venv/
 env/
 ENV/
+# Interpreter-version-specific throwaway venvs used for CI-reproduction
+# investigation (2026-08-14, see HAZARD-STREAM-013) -- not a naming
+# convention worth generalizing further, just covering the ones actually
+# created at repo root during that investigation.
+venv3*/
+# Isolated demonstration-layer venv (requirements-demo.txt).
+# Separate from venv311 because streamlit requires websockets<17 while
+# requirements.txt pins websockets==17.0.1.
+venv-demo/
+venv*_versions.txt
 
 # ── IDE / Editor ───────────────────────────────────────────────────────
 .vscode/
@@ -33,3 +46,27 @@ dist/
 # ── OS ─────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+
+# ── Local scratch / non-source artifacts (untracked, not part of the codebase) ──
+# These were found sitting at repo root outside version control; ignored rather
+# than deleted per session decision on 2026-08-09. Not reviewed for content.
+# Commercial pitch-deck binaries. v1 was already excluded by exact
+# filename; generalized so successive revisions follow the same rule
+# rather than each needing a new line (and rather than a large binary
+# with no meaningful diff landing in history).
+ICU-Edge-Gateway_Pitch_Deck*.pptx
+ICU_Edge_Gateway_Risk_Register_2.xlsx
+# Timestamped snapshots of the same register (e.g. .backup-20260810c-pre-interim-signoff.xlsx)
+# carry the same "no git-based recovery net desired" intent as the line above — extended here
+# per explicit confirmation on 2026-08-14, not silently assumed.
+ICU_Edge_Gateway_Risk_Register_2.backup-*.xlsx
+files.zip
+files/
+icu_full_code.txt
+merge_code.py
+
+# ── Agent / Assistant session state ────────────────────────────────────
+# Local Claude Code session/permission state. Machine-specific, not a
+# project artifact -- CLAUDE.md (the checked-in project directive) is
+# tracked, this directory is not.
+.claude/

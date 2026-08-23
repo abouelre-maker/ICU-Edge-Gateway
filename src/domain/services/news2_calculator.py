@@ -108,11 +108,19 @@ class NEWS2Calculator:
         # Consciousness defaults to Alert (conservative: 0 points)
         avpu = self._extract_avpu(vitals)
 
-        assert rr is not None  # guaranteed by _assert_required_parameters_present
-        assert spo2 is not None
-        assert sbp is not None
-        assert hr is not None
-        assert temp is not None
+        # Bandit B101 (assert_used): these are pure type-narrowing aids for
+        # mypy, not the actual safety-relevant validation -- that already
+        # happened above via _assert_required_parameters_present(), which
+        # raises NEWS2InsufficientDataError before this point if any of
+        # rr/spo2/sbp/hr/temp were absent or out-of-bounds. Even if
+        # `python -O` stripped these (this project's Dockerfile/entrypoint
+        # never enables optimized mode), the values are guaranteed non-None
+        # by that prior check, not by these asserts.
+        assert rr is not None  # nosec B101
+        assert spo2 is not None  # nosec B101
+        assert sbp is not None  # nosec B101
+        assert hr is not None  # nosec B101
+        assert temp is not None  # nosec B101
 
         return NEWS2Score(
             resp_rate_score=self._score_respiratory_rate(rr),
@@ -192,7 +200,11 @@ class NEWS2Calculator:
             return AVPULevel.ALERT
         most_recent = max(candidates, key=lambda v: v.original.timestamp)
         avpu = most_recent.original.avpu_level
-        assert avpu is not None  # guaranteed by filter above
+        # Bandit B101 (assert_used): type-narrowing only -- `avpu` is
+        # guaranteed non-None by the `and v.original.avpu_level is not None`
+        # filter in the list comprehension above; this assert documents
+        # that invariant for mypy, it is not the actual validation.
+        assert avpu is not None  # nosec B101
         return avpu
 
     @staticmethod

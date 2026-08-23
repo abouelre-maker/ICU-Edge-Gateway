@@ -1,0 +1,218 @@
+# =============================================================================
+# ICU Edge Gateway — K3s Edge-Appliance Deployment
+# Phase 5 Section B: zero-touch enrollment wiring.
+# Phase 5-Stream Section C: CA bundle distribution (this update).
+#
+# NOT a fully turnkey manifest for an unknown cluster -- it documents and
+# wires the trust-chain pieces this repo owns (cert volume, token secret
+# mount, opt-in provisioning env vars, non-root securityContext matching
+# the Dockerfile's UID/GID 1001). What it deliberately does NOT do:
+#   - Mint or rotate the enrollment-token Secret's VALUE, or the CA bundle
+#     content. Both are control-plane-issued artifacts -- an operator or a
+#     separate provisioning controller populates icu-edge-enrollment-token
+#     before this Pod's first start. This manifest only declares the
+#     Secret SHAPE it expects to mount.
+#   - Implement the control plane itself (the bootstrap/enroll/reattest
+#     HTTP endpoints) -- see infra/terraform/DESIGN.md and
+#     infrastructure/provisioning/enrollment_client.py's docstring: this
+#     repo is the device/client side of the protocol only.
+#
+# DESIGN NOTE -- CA bundle distribution (explicit, per project owner
+# instruction): PROVISIONING_CA_BUNDLE_PATH's certificate (the pinned CA a
+# device trusts for its FIRST enrollment attempt -- see enrollment_client.py's
+# HAZARD-STREAM-010 update) travels through the SAME out-of-band channel and
+# the SAME Secret as the enrollment token below (`icu-edge-enrollment-token`,
+# key `ca_bundle.pem`), not a separate undocumented channel. This matters
+# specifically because bootstrap_cli.py reads PROVISIONING_CA_BUNDLE_PATH
+# BEFORE the device's first enroll() call -- if the CA bundle arrived through
+# a less-controlled path than the token (e.g. baked into the ConfigMap, or a
+# second ad-hoc Secret an operator might forget to rotate/protect the same
+# way), the CA-pinning mitigation added in the prior session would be
+# undermined by its own delivery mechanism. Both artifacts are provisioned
+# together, at the same time, by the same out-of-band process (an operator
+# or a provisioning controller -- see infra/terraform/modules/provisioning-api
+# for the server side that issues the token; the CA bundle itself is the
+# chosen CA's public cert, see infra/terraform/modules/ca).
+# =============================================================================
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: icu-edge-gateway-pki
+  labels:
+    app: icu-edge-gateway
+    icu-edge-gateway.provisioning.component: device-enrollment
+spec:
+  # Must persist across Pod restarts/rescheduling on the SAME node (or a
+  # storage class supporting ReadWriteOnce elsewhere) -- otherwise every
+  # restart looks like a fresh, never-enrolled device and burns another
+  # single-use enrollment token it doesn't have. Not ReadWriteMany: a
+  # device certificate is bound to exactly one appliance instance.
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 64Mi
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: icu-edge-gateway-provisioning-config
+  labels:
+    app: icu-edge-gateway
+data:
+  PROVISIONING_ENABLED: "true"
+  PROVISIONING_BOOTSTRAP_URL: "https://control-plane.example.org/provisioning"
+  # Operator-set per fleet/site to a stable hardware serial or
+  # pre-provisioned device UUID -- NOT the Pod hostname (see
+  # config.get_device_common_name()'s docstring: a rescheduled Pod gets a
+  # new hostname, which is not stable device identity).
+  DEVICE_COMMON_NAME: "CHANGE-ME-stable-device-id"
+  CERT_STORE_PATH: "/var/lib/icu-edge-gateway/pki"
+  PROVISIONING_MAX_ENROLL_ATTEMPTS: "5"
+  REATTESTATION_INTERVAL_SECONDS: "3600"
+  # File-based, mounted from the SAME Secret/volume as the enrollment
+  # token below -- see the header DESIGN NOTE. NOT a raw PEM value here;
+  # this is a path into the mounted enrollment-token Secret volume.
+  PROVISIONING_CA_BUNDLE_PATH: "/etc/icu-edge-gateway/enrollment/ca_bundle.pem"
+
+---
+# SHAPE ONLY -- see header note. `stringData.token` and `stringData.
+# "ca_bundle.pem"` here are placeholders; a real deployment replaces this
+# whole Secret's values out-of-band (kubectl create secret / a
+# provisioning controller), never commits real values to a manifest
+# checked into source control.
+#
+# BOTH keys live in this ONE Secret deliberately (see header DESIGN NOTE):
+# the enrollment token and the CA bundle a device must pin to BEFORE its
+# first enrollment attempt are provisioned together, by the same
+# out-of-band process, at the same time -- not two separate mechanisms an
+# operator could accidentally desynchronize (e.g. rotate the token but
+# forget the CA bundle, or protect one with tighter access controls than
+# the other).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: icu-edge-enrollment-token
+  labels:
+    app: icu-edge-gateway
+type: Opaque
+stringData:
+  token: "REPLACE-WITH-CONTROL-PLANE-ISSUED-SINGLE-USE-TOKEN"
+  ca_bundle.pem: |
+    REPLACE-WITH-THE-CONTROL-PLANE-CA-PUBLIC-CERTIFICATE-PEM
+    (see infra/terraform/modules/ca's output `ca_certificate_pem` -- this
+    is a public certificate, not a secret in the confidentiality sense,
+    but it lives in this Secret anyway so it is provisioned atomically
+    with the token it must arrive alongside, per the header DESIGN NOTE.)
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: icu-edge-gateway
+  labels:
+    app: icu-edge-gateway
+spec:
+  # Exactly one replica: a device certificate identifies ONE physical edge
+  # appliance. This is not a horizontally-scaled stateless web service --
+  # see main.py's existing "single-worker uvicorn" comment, same reasoning
+  # extended to the Pod level.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: icu-edge-gateway
+  template:
+    metadata:
+      labels:
+        app: icu-edge-gateway
+    spec:
+      # Matches the Dockerfile's `addgroup -g 1001 gateway` / `adduser -u
+      # 1001 gateway` non-root user. fsGroup ensures the mounted PVC is
+      # writable by that UID/GID regardless of the storage backend's
+      # default root-owned mount behavior.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+      containers:
+        - name: icu-edge-gateway
+          image: icu-edge-gateway:1.0.0-phase5-section-b
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: icu-edge-gateway-provisioning-config
+          env:
+            # File-based (Secret volume), not a raw env var -- see
+            # config.get_enrollment_token()'s docstring: ENROLLMENT_TOKEN_FILE
+            # is preferred specifically so the token isn't visible via
+            # `kubectl describe pod` / process listings the way a plain env
+            # var would be.
+            - name: ENROLLMENT_TOKEN_FILE
+              value: /etc/icu-edge-gateway/enrollment/token
+          volumeMounts:
+            - name: pki
+              mountPath: /var/lib/icu-edge-gateway/pki
+            - name: enrollment-token
+              mountPath: /etc/icu-edge-gateway/enrollment
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # / (rootfs) is read-only (above) -- these are the only two
+          # directories this container writes to at runtime.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            # Generous initial delay: entrypoint.sh's enrollment handshake
+            # (bounded retries with backoff, PROVISIONING_MAX_ENROLL_ATTEMPTS)
+            # must complete before uvicorn even starts listening -- a probe
+            # that fires before that finishes would kill a Pod that is
+            # correctly, if slowly, still enrolling.
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+      volumes:
+        - name: pki
+          persistentVolumeClaim:
+            claimName: icu-edge-gateway-pki
+        - name: enrollment-token
+          secret:
+            secretName: icu-edge-enrollment-token
+            items:
+              - key: token
+                path: token
+                mode: 0400
+              # Same Secret, same volume, same mount -- see header DESIGN
+              # NOTE. PROVISIONING_CA_BUNDLE_PATH (ConfigMap, above) points
+              # at this file once mounted (mountPath is shared with the
+              # token below, so the full path is
+              # /etc/icu-edge-gateway/enrollment/ca_bundle.pem).
+              - key: ca_bundle.pem
+                path: ca_bundle.pem
+                mode: 0444  # public certificate -- readable is fine, unlike the token

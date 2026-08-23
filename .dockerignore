@@ -45,3 +45,18 @@ Thumbs.db
 # Build artifacts
 dist/
 build/
+
+# ── Demonstration layer — MUST NOT enter the SaMD image ────────────────────
+# demo/ holds the Streamlit clinical demonstration dashboard. It is NOT part
+# of the IEC 62304 Class B software item, and shipping it would widen the
+# device's regulatory scope. It lives outside src/ specifically so the
+# Dockerfile's `COPY src/ ./src/` cannot pick it up -- this entry is a second,
+# independent layer of that same exclusion, and
+# .github/workflows/docker-verify.yml asserts the file is absent from the
+# built image as a third.
+demo/
+requirements-demo.txt
+scripts/
+venv-demo/
+run_demo.bat
+run_demo.sh

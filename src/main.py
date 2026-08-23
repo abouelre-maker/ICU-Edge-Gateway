@@ -9,20 +9,45 @@ ensuring consistent audit logging and error handling for every clinical request.
 
 from __future__ import annotations
 
+import asyncio
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 import structlog
 import uvicorn
+from api.v1.fhir_subscription import router as fhir_subscription_router
 from api.v1.health import router as health_router
 from api.v1.ingest import router as ingest_router
+from api.v1.live import router as live_router
 from api.v1.vitals import router as vitals_router
-from config import get_cors_allowed_origins
+from config import (
+    get_cert_store_path,
+    get_cors_allowed_origins,
+    get_mllp_enabled,
+    get_mllp_host,
+    get_mllp_port,
+    get_mqtt_config,
+    get_mqtt_enabled,
+    get_provisioning_bootstrap_url,
+    get_provisioning_ca_bundle_path,
+    get_provisioning_enabled,
+    get_reattestation_interval_seconds,
+)
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from infrastructure.provisioning.cert_store import CertStore
+from infrastructure.provisioning.reattestation import reattestation_loop
+from infrastructure.streaming.live_dashboard_channel import LiveDashboardChannel
+from infrastructure.streaming.mllp_listener import MLLPListener
+from infrastructure.streaming.mqtt_publisher import MQTTPublisher
+from infrastructure.streaming.ring_buffer import StoreAndForwardRingBuffer
+from infrastructure.streaming.subscription_dispatcher import SubscriptionDispatcher
+from infrastructure.streaming.subscription_registry import SubscriptionRegistry
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
+
+_FORWARD_BUFFER_CAPACITY = 10_000
 
 
 @asynccontextmanager
@@ -33,10 +58,117 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     IEC 62304 §5.8: Startup and shutdown events are timestamped and logged
     for clinical environment audit trails.
     app.state.start_time is set here — read by GET /health for uptime.
+
+    Phase 5 Section A: when MLLP_ENABLED=true, an MLLPListener is started
+    alongside the HTTP app so the edge appliance can accept HL7 v2.x
+    directly over MLLP (port 2575 by default) in addition to
+    POST /api/v1/ingest. Disabled by default — existing HTTP-only
+    deployments are unaffected. See infrastructure/streaming/mllp_listener.py.
+
+    When MQTT_ENABLED=true, an MQTTPublisher drains the same
+    StoreAndForwardRingBuffer and forwards each FHIR Bundle to a cloud
+    broker. The buffer is created unconditionally (cheap, in-memory) so
+    either component can be enabled independently. Disabled by default.
+    See infrastructure/streaming/mqtt_publisher.py.
+
+    A LiveDashboardChannel is always created (cheap, in-memory, no
+    connection to manage until a dashboard client actually connects) so
+    WS /api/v1/live/vitals is available regardless of MLLP/MQTT config.
+    Every ingestion path (MLLP, POST /api/v1/ingest, POST /api/v1/vitals)
+    pushes a delta through it. See
+    infrastructure/streaming/live_dashboard_channel.py.
+
+    A SubscriptionRegistry + SubscriptionDispatcher are likewise always
+    created so POST /api/v1/fhir/Subscription is available regardless of
+    MLLP/MQTT config; the dispatcher's httpx.AsyncClient is closed on
+    shutdown. See infrastructure/fhir/subscription.py and
+    infrastructure/streaming/subscription_dispatcher.py.
+
+    Phase 5 Section B follow-up: when PROVISIONING_ENABLED=true, a
+    background asyncio.Task runs reattestation_loop() (HAZARD-STREAM-011
+    mitigation) for the lifetime of this app -- see
+    infrastructure/provisioning/reattestation.py for why this lives in the
+    lifespan rather than bootstrap_cli.py. The task is cancelled and
+    awaited (not abandoned) on shutdown. Disabled by default, same
+    opt-in convention as MLLP/MQTT.
     """
     app.state.start_time = time.monotonic()
+    app.state.forward_buffer = StoreAndForwardRingBuffer(
+        capacity=_FORWARD_BUFFER_CAPACITY
+    )
+    app.state.live_dashboard_channel = LiveDashboardChannel()
+    app.state.subscription_registry = SubscriptionRegistry()
+    app.state.subscription_dispatcher = SubscriptionDispatcher(
+        registry=app.state.subscription_registry
+    )
+    app.state.mllp_listener = None
+    app.state.mqtt_publisher = None
+    app.state.reattestation_task = None
+
+    if get_mllp_enabled():
+        listener = MLLPListener(
+            host=get_mllp_host(),
+            port=get_mllp_port(),
+            forward_buffer=app.state.forward_buffer,
+            live_channel=app.state.live_dashboard_channel,
+            subscription_dispatcher=app.state.subscription_dispatcher,
+        )
+        await listener.start()
+        app.state.mllp_listener = listener
+        _log.info(
+            "icu_edge_gateway.mllp_listener.started",
+            host=get_mllp_host(),
+            port=listener.port,
+        )
+
+    if get_mqtt_enabled():
+        mqtt_config = get_mqtt_config()
+        publisher = MQTTPublisher(
+            buffer=app.state.forward_buffer,
+            broker_host=mqtt_config.broker_host,
+            broker_port=mqtt_config.broker_port,
+            topic_prefix=mqtt_config.topic_prefix,
+            client_id=mqtt_config.client_id,
+            use_tls=mqtt_config.use_tls,
+            qos=mqtt_config.qos,
+            username=mqtt_config.username,
+            password=mqtt_config.password,
+            publish_interval_seconds=mqtt_config.publish_interval_seconds,
+            drain_batch_size=mqtt_config.drain_batch_size,
+        )
+        await publisher.start()
+        app.state.mqtt_publisher = publisher
+        _log.info(
+            "icu_edge_gateway.mqtt_publisher.started",
+            broker_host=mqtt_config.broker_host,
+            broker_port=mqtt_config.broker_port,
+        )
+
+    if get_provisioning_enabled():
+        app.state.reattestation_task = asyncio.create_task(
+            reattestation_loop(
+                cert_store=CertStore(get_cert_store_path()),
+                bootstrap_url=get_provisioning_bootstrap_url(),
+                interval_seconds=get_reattestation_interval_seconds(),
+                ca_bundle_path=get_provisioning_ca_bundle_path(),
+            )
+        )
+        _log.info(
+            "icu_edge_gateway.reattestation_loop.started",
+            interval_seconds=get_reattestation_interval_seconds(),
+        )
+
     _log.info("icu_edge_gateway.startup", version=app.version)
     yield
+    if app.state.reattestation_task is not None:
+        app.state.reattestation_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await app.state.reattestation_task
+    if app.state.mqtt_publisher is not None:
+        await app.state.mqtt_publisher.stop()
+    if app.state.mllp_listener is not None:
+        await app.state.mllp_listener.stop()
+    await app.state.subscription_dispatcher.aclose()
     uptime = round(time.monotonic() - app.state.start_time, 2)
     _log.info("icu_edge_gateway.shutdown", uptime_seconds=uptime)
 
@@ -53,8 +185,18 @@ def create_app() -> FastAPI:
         description=(
             "**SaMD Middleware** — Transforms legacy ICU monitor data (HL7 v2.x) "
             "into FHIR R4 Bundles with embedded NEWS2 clinical scoring.\n\n"
-            "**Regulatory:** IEC 62304 Class B · ISO 14971 · "
-            "FDA CDS Non-Device Exemption · Health Canada Class II.\n\n"
+            # Wording fixed by claude/verified_claims_sheet.md §3; §2 forbids
+            # asserting an FDA exemption or a Health Canada class. This string is
+            # SERVED to integrators via /openapi.json and Swagger UI, so it is
+            # buyer-facing copy, not an internal source comment.
+            "**Regulatory:** Engineered under IEC 62304 Class B software "
+            "life-cycle practices with ISO 14971 risk analysis applied to each "
+            "hazard; designed against the non-device clinical decision support "
+            "criteria in FD&C Act §520(o)(1)(E) as interpreted by FDA's Clinical "
+            "Decision Support Software guidance. Output is advisory only and "
+            "requires independent clinician review; the software triggers no "
+            "automated treatment. These are the developer's own determinations "
+            "and have not been reviewed by FDA or any notified body.\n\n"
             "**Standards:** HL7 FHIR R4 · LOINC · SNOMED CT · UCUM · RCP NEWS2 2017."
         ),
         version="1.0.0",
@@ -138,6 +280,10 @@ def create_app() -> FastAPI:
     app.include_router(health_router)  # GET  /health
     app.include_router(ingest_router, prefix="/api/v1")  # POST /api/v1/ingest
     app.include_router(vitals_router, prefix="/api/v1")  # POST /api/v1/vitals
+    app.include_router(live_router, prefix="/api/v1")  # WS   /api/v1/live/vitals
+    app.include_router(
+        fhir_subscription_router, prefix="/api/v1"
+    )  # /api/v1/fhir/Subscription
 
     return app
 
@@ -148,7 +294,14 @@ app: FastAPI = create_app()
 if __name__ == "__main__":
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
+        # Bandit B104 (hardcoded_bind_all_interfaces): standard container
+        # practice -- bind-all inside the container; the actual network
+        # exposure boundary is the container/k3s network policy, not this
+        # bind address. This block is also only the local `python main.py`
+        # dev entrypoint; the production container entrypoint
+        # (docker/entrypoint.sh) invokes uvicorn directly via CLI args,
+        # bypassing this line entirely.
+        host="0.0.0.0",  # nosec B104
         port=8000,
         workers=1,
         reload=False,

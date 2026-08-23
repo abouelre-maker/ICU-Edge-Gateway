@@ -2,7 +2,14 @@
 Unit Tests — DSP Artifact Rejection Pipeline.
 
 IEC 62304 §5.7: Verification of all filter implementations.
-ISO 14971 HAZARD-DSP-001/002/003, plus HAZARD-DSP-006 edge-margin coverage.
+ISO 14971 HAZARD-DSP-001/002/003, plus HAZARD-DSP-006 edge-margin coverage,
+and HAZARD-DSP-007 (below: zero-length/single-sample/NaN-Inf/sampling-rate-
+extreme edge cases, Phase 5-Stream Section D).
+
+SYNTHETIC TEST DATA — FOR AUTOMATED TESTING ONLY, NOT CLINICAL VALIDATION
+EVIDENCE. All signals below are synthetically constructed to exercise
+specific code paths (including deliberately invalid/degenerate inputs) and
+are not derived from, or representative of, real patient monitor output.
 """
 
 from __future__ import annotations
@@ -270,3 +277,184 @@ class TestPhysiologicalBoundsChecker:
         assert (
             ok
         ), "SBP=220 is within physiological bounds (max=300). NEWS2 should score it."
+
+    def test_nan_hr_is_explicitly_rejected_not_silently_in_bounds(self) -> None:
+        """
+        ISO 14971 HAZARD-DSP-007 regression: `NaN < low` and `NaN > high` are
+        both always False (IEEE-754), so before the fix this silently
+        returned ok=True and NEWS2Calculator._extract_value() (which selects
+        on exactly this flag) would have used it as a scoring input.
+        """
+        checker = PhysiologicalBoundsChecker()
+        ok, note = checker.check(VitalSignType.HEART_RATE, float("nan"))
+        assert ok is False
+        assert "NaN" in note
+
+    def test_nan_is_rejected_even_for_a_type_with_no_configured_bounds(self) -> None:
+        """CONSCIOUSNESS has no _PHYSIOLOGICAL_BOUNDS entry -- NaN must still
+        not fall through the "no bounds configured -> always ok" early return."""
+        checker = PhysiologicalBoundsChecker()
+        ok, note = checker.check(VitalSignType.CONSCIOUSNESS, float("nan"))
+        assert ok is False
+        assert "NaN" in note
+
+    def test_inf_hr_was_already_correctly_rejected(self) -> None:
+        """Inf > high is True, so this direction was never the gap -- regression
+        guard proving the NaN fix above didn't change this pre-existing behavior."""
+        checker = PhysiologicalBoundsChecker()
+        ok, note = checker.check(VitalSignType.HEART_RATE, float("inf"))
+        assert ok is False
+        assert "physiological range" in note
+
+
+class TestNonFiniteRejection:
+    """
+    ISO 14971 HAZARD-DSP-007: a NaN/Inf sample anywhere mid-array must be
+    explicitly rejected (ValueError) by every filter, never silently
+    filtered -- scipy's filtfilt propagates a single NaN/Inf sample through
+    its ENTIRE output via IIR feedback with no exception raised on its own.
+    """
+
+    def _signal_with_nan_mid_array(self, n: int = 20) -> np.ndarray:
+        sig = np.full(n, 0.1)
+        sig[n // 2] = np.nan
+        return sig
+
+    def _signal_with_inf_mid_array(self, n: int = 20) -> np.ndarray:
+        sig = np.full(n, 0.1)
+        sig[n // 2] = np.inf
+        return sig
+
+    def test_notch_rejects_nan_mid_array(self) -> None:
+        with pytest.raises(ValueError, match="NaN or Inf"):
+            DualNotchFilter().apply(self._signal_with_nan_mid_array(), _FS)
+
+    def test_notch_rejects_inf_mid_array(self) -> None:
+        with pytest.raises(ValueError, match="NaN or Inf"):
+            DualNotchFilter().apply(self._signal_with_inf_mid_array(), _FS)
+
+    def test_notch_does_not_silently_propagate_nan(self) -> None:
+        """Regression proof of the pre-fix defect: without _require_finite,
+        this call returned a fully-NaN array with NO exception."""
+        sig = self._signal_with_nan_mid_array()
+        with pytest.raises(ValueError):
+            DualNotchFilter().apply(sig, _FS)
+
+    def test_bandpass_rejects_nan_mid_array(self) -> None:
+        f = BandpassFilter(vital_sign_type=VitalSignType.HEART_RATE)
+        with pytest.raises(ValueError, match="NaN or Inf"):
+            f.apply(self._signal_with_nan_mid_array(), _FS)
+
+    def test_bandpass_rejects_inf_mid_array(self) -> None:
+        f = BandpassFilter(vital_sign_type=VitalSignType.HEART_RATE)
+        with pytest.raises(ValueError, match="NaN or Inf"):
+            f.apply(self._signal_with_inf_mid_array(), _FS)
+
+    def test_hampel_rejects_nan_mid_array(self) -> None:
+        with pytest.raises(ValueError, match="NaN or Inf"):
+            HampelFilter().apply_with_mask(self._signal_with_nan_mid_array())
+
+    def test_hampel_rejects_inf_mid_array(self) -> None:
+        with pytest.raises(ValueError, match="NaN or Inf"):
+            HampelFilter().apply_with_mask(self._signal_with_inf_mid_array())
+
+
+class TestZeroLengthAndSingleSampleArrays:
+    """
+    Explicit zero-length and single-sample array coverage for every filter --
+    each must fail closed (raise) rather than crash unpredictably or return
+    a misleadingly "processed" result from a degenerate input.
+    """
+
+    def test_notch_raises_on_zero_length_array(self) -> None:
+        with pytest.raises(ValueError, match="too short"):
+            DualNotchFilter().apply(np.array([]), _FS)
+
+    def test_notch_raises_on_single_sample_array(self) -> None:
+        with pytest.raises(ValueError, match="too short"):
+            DualNotchFilter().apply(np.array([72.0]), _FS)
+
+    def test_bandpass_raises_on_zero_length_array(self) -> None:
+        f = BandpassFilter(vital_sign_type=VitalSignType.HEART_RATE)
+        with pytest.raises(ValueError, match="empty signal"):
+            f.apply(np.array([]), _FS)
+
+    def test_bandpass_raises_on_single_sample_array(self) -> None:
+        f = BandpassFilter(vital_sign_type=VitalSignType.HEART_RATE)
+        with pytest.raises(ValueError, match="too short"):
+            f.apply(np.array([72.0]), _FS)
+
+    def test_hampel_raises_on_zero_length_array(self) -> None:
+        with pytest.raises(ValueError, match="empty signal"):
+            HampelFilter().apply_with_mask(np.array([]))
+
+    def test_hampel_accepts_single_sample_array_as_a_trivial_no_op(self) -> None:
+        """
+        Documented, deliberate contrast with the other two filters: a
+        single-sample median window is well-defined (nothing to compare
+        against, so nothing can be flagged as an outlier) -- Hampel does
+        NOT raise here, unlike DualNotchFilter/BandpassFilter which need a
+        minimum window to be meaningful at all. This is not a gap: the
+        orchestrator (signal_processor.py) only ever reaches Hampel with
+        whatever notch/bandpass already skipped-and-passed-through, so a
+        single-sample waveform still ends up correctly un-"cleaned" rather
+        than fabricated.
+        """
+        cleaned, mask = HampelFilter().apply_with_mask(np.array([72.0]))
+        assert cleaned.tolist() == [72.0]
+        assert mask.tolist() == [False]
+
+
+class TestSamplingRateExtremes:
+    """
+    ISO 14971 HAZARD-DSP-007: sampling_rate_hz at implausible extremes must
+    not produce a silently-wrong filtered output -- either it fails closed
+    (explicit ValueError) or it completes with a numerically sane, finite
+    result. Neither filter is allowed to return NaN/Inf without raising.
+    """
+
+    def test_notch_near_zero_rate_is_a_documented_no_op_not_a_crash(self) -> None:
+        """
+        At an implausibly low sampling_rate_hz, Nyquist collapses below
+        both 50 Hz and 60 Hz, so DualNotchFilter's own `if freq < nyquist`
+        guard means neither notch stage ever runs -- this is a genuine,
+        deliberate no-op (output == input), not a crash and not corrupted
+        data. It does NOT raise (this is existing, pre-fix behavior,
+        unchanged here -- see test_skips_frequency_above_nyquist above for
+        the same pattern at a more realistic rate).
+        """
+        sig = np.random.default_rng(0).standard_normal(50)
+        result = DualNotchFilter().apply(sig, 1e-6)
+        assert np.all(np.isfinite(result))
+        np.testing.assert_array_equal(result, sig)
+
+    def test_bandpass_near_zero_rate_fails_closed(self) -> None:
+        """
+        Unlike notch, BandpassFilter's Nyquist-clamp can invert its passband
+        at a near-zero rate (`high` clamped below `low`) -- explicitly
+        rejected (see artifact_rejector.py's low >= high guard) rather than
+        handed to scipy.signal.butter with a degenerate band.
+        """
+        f = BandpassFilter(vital_sign_type=VitalSignType.HEART_RATE)
+        sig = np.random.default_rng(0).standard_normal(50)
+        with pytest.raises(ValueError, match="too low"):
+            f.apply(sig, 1e-6)
+
+    def test_notch_extremely_high_rate_completes_finite(self) -> None:
+        sig = np.random.default_rng(0).standard_normal(500)
+        result = DualNotchFilter().apply(sig, 1e9)
+        assert np.all(np.isfinite(result))
+
+    def test_bandpass_extremely_high_rate_completes_finite(self) -> None:
+        f = BandpassFilter(vital_sign_type=VitalSignType.HEART_RATE)
+        sig = np.random.default_rng(0).standard_normal(500)
+        result = f.apply(sig, 1e9)
+        assert np.all(np.isfinite(result))
+
+    def test_notch_raises_on_zero_rate(self) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            DualNotchFilter().apply(np.random.default_rng(0).standard_normal(50), 0.0)
+
+    def test_notch_raises_on_negative_rate(self) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            DualNotchFilter().apply(np.random.default_rng(0).standard_normal(50), -500.0)
