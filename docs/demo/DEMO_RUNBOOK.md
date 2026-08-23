@@ -23,7 +23,7 @@ This is the single most likely way the demo breaks in someone else's hands.
 `requirements.txt` pins `websockets==17.0.1` as a production runtime
 dependency of the FHIR Subscription dispatcher and the live channel. Installing
 Streamlit into `venv311` **silently downgrades** websockets and leaves the
-validated test environment no longer matching its own pin file — exactly the
+verified test environment no longer matching its own pin file — exactly the
 drift HAZARD-STREAM-013 was raised for.
 
 Create them:
