@@ -15,7 +15,7 @@ identical to the committed offline copy. **37 commits on the working branch / 47
 2026-08-23 with `git rev-list --count main..HEAD` and `--count HEAD`. The earlier "33 / 43" was recorded
 before the four 2026-08-22 recovery commits (`435d004`, `2650130`, `672e1f1`, `c61c367`) landed, and "19"
 before that; this is the third time this figure has gone stale, so re-measure it rather than quoting it.
-Nothing pushed.
+Pushed 2026-08-23: the branch went from `94cbe08` to `74a6a02` (25 commits), then `fec2259` and `29ec3eb` on top. Open as PR #1. Not merged.
 
 ---
 
@@ -23,7 +23,7 @@ Nothing pushed.
 
 | Claim | Evidence | Verified how |
 |---|---|---|
-| **816 automated tests passing, 1 xfailed** | Full suite | `pytest -q` / `pytest --cov=src`, re-run 2026-08-23 on venv311. **LOCAL-ONLY — not yet CI-confirmed.** CI has never executed the pytest step: it was skipped on 2026-08-23 when pip-audit failed ahead of it, and the last CI run that reached pytest (`94cbe08`, 2026-08-14) failed it with the since-fixed HAZARD-DSP-007 NaN defects. Do not describe this number as CI-verified until a CI run actually runs it |
+| **816 automated tests passing, 1 xfailed** | Full suite | `pytest -q` / `pytest --cov=src`, re-run 2026-08-23 on venv311. **LOCAL-ONLY — not yet CI-confirmed.** The pytest step has never *passed* in CI: skipped in two runs (`89b0227` and `74a6a02`, where an earlier step failed first) and executed-but-failed in one (`94cbe08`, 2026-08-14 — 3 failed / 594 passed, the since-fixed HAZARD-DSP-007 NaN defects). Do not describe this number as CI-verified until a CI run actually runs it |
 | **95% statement coverage of `src/`** | 2302 statements, 124 missed | `pytest --cov` |
 | **Zero-regression discipline across six phases** | 667 → 709 → 744 → 816, baseline held at every gate | Recorded per phase |
 | **Static analysis clean** | `ruff check .` clean repo-wide; `mypy src` success across 46 files; Bandit clean at severity floor `low` | Local run **and CI-confirmed 2026-08-23** on commit `74a6a02` — [run](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32631860663): Ruff, Mypy and Bandit steps all green on a clean ubuntu-latest runner |
@@ -103,7 +103,9 @@ buyers in this market are unusually receptive to it.
 1. No real patient data yet — synthetic only, deliberately labelled as such on every screen.
 2. Regulatory posture is self-assessed and awaits counsel review; REG-CITATION-001 is open.
 3. The security layer (TLS, authn/z, CORS) is deployment work, not yet done.
-4. The container image is verified by CI, not by hand — and CI has not yet run.
+4. The container image is verified by CI, not by hand. **CI has now run** (2026-08-23, `74a6a02`): `docker-verify.yml` passed every assertion, so non-root operation, the HEALTHCHECK and the
+   demo-layer exclusion are in §1. Image size and layer count remain unread — that workflow writes
+   them only to the job summary, never to stdout.
 5. One timing-sensitive async test (`test_failed_item_is_requeued_not_dropped`, FLAKE-MQTT-001) failed
    once under CPU contention and passed on every subsequent run. Recorded and left unexplained rather
    than silenced by loosening the assertion.

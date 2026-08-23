@@ -2,7 +2,9 @@
 
 **Prepared:** 2026-08-23 · **Branch:** `phase5/streaming-mllp-listener` → `main`
 **Scope:** Phase 5 (streaming MLLP listener) through Phase 9 (commercial demo package).
-**Nothing has been pushed.** This document is the pre-push record.
+**Originally written as the pre-push record; the branch has since been pushed.** See §1a for
+what actually happened. Sections 6 and 7 are preserved as the pre-push snapshot and are
+explicitly marked as historical.
 
 Claims here are bounded by [`claude/verified_claims_sheet.md`](claude/verified_claims_sheet.md).
 Where that sheet's §2 says a thing cannot be claimed yet, this document does not claim it —
@@ -58,8 +60,11 @@ the quality gate failed ahead of it.
 NaN defects), and `74a6a02` at pip-audit. pip-audit *passed* on `94cbe08` nine days earlier
 against the same unchanged `pytest==7.4.4` pin; `PYSEC-2026-1845` was published in between.
 
-**`pytest` was skipped in every CI run so far**, so the 816 / 1 xfailed figure remains
-**local-only** and must not be described as CI-confirmed until a run actually executes it.
+**`pytest` has never *passed* in a CI run**, so the 816 / 1 xfailed figure remains
+**local-only**. It has been skipped in two runs (`89b0227`, `74a6a02` — an earlier step failed
+first) and it executed and *failed* in one (`94cbe08`, 3 failed / 594 passed, the since-fixed
+HAZARD-DSP-007 NaN defects). Do not describe the figure as CI-confirmed until a run completes
+the step green.
 
 ---
 
@@ -263,16 +268,21 @@ launchers.
 ?? claude/
 ```
 
-**These changes are uncommitted.** They must be committed before the push command in §7
-carries them. `claude/verified_claims_sheet.md` is currently untracked — decide
-deliberately whether the approved-claims sheet belongs in the repository or stays out of
-it, since pushing it publishes the sheet along with the honest gap list in its §2.
+**Historical snapshot — these changes have since been committed and pushed.** They went in as
+`74a6a02`, which is the commit all three CI runs in §1a ran against.
+`claude/verified_claims_sheet.md` was untracked at the time; the repository was confirmed
+private and the sheet was committed as-is, so it is now published in-repo along with the
+honest gap list in its §2.
 
 ---
 
-## 7. Push and PR — commands only, NOT executed
+## 7. Push and PR — HISTORICAL: these commands have since been run
 
-Neither command below has been run. Nothing has been pushed.
+Both commands below were executed on 2026-08-23. The push delivered 25 commits (the remote
+branch had been sitting at `94cbe08` since 2026-08-14). `gh pr create` returned an error
+because a PR for this branch already existed — **PR #1**, opened 2026-08-13 — so its title and
+body were updated in place with `gh pr edit 1` instead. Later commits `fec2259` and `29ec3eb`
+were pushed on top. See §1a for the CI outcomes.
 
 ```bash
 git push -u origin phase5/streaming-mllp-listener

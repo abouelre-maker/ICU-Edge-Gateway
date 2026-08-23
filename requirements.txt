@@ -8,11 +8,21 @@
 # the same way.
 numpy==2.4.6
 scipy==1.17.1
-# pytest / pytest-cov are TEST-ONLY tools and live in requirements-dev.txt,
-# where they were already pinned identically. They were duplicated here,
-# which put a test framework in the production dependency file and made
+# pytest==7.4.4 was REMOVED from this file on 2026-08-23. It was duplicated
+# here and in requirements-dev.txt (identical pin), which put a test
+# framework in the production dependency file and made
 # `pip-audit --requirement requirements.txt` scan it as production SOUP.
-# Removed 2026-08-23. Nothing under src/ imports pytest at runtime.
+# Nothing under src/ imports pytest at runtime, and CI confirms /app/tests
+# is absent from the built image.
+#
+# pytest-cov BELOW IS STILL HERE, DELIBERATELY NOT REMOVED IN THAT CHANGE --
+# the authorised edit covered pytest only. It is equally test-only and
+# equally duplicated in requirements-dev.txt:3, so it is a live question
+# whether it should follow pytest out of this file. It does NOT reintroduce
+# the advisory: pytest-cov==4.1.0 requires `pytest>=4.6`, which resolves to a
+# fixed pytest, and `pip-audit -r` against pytest-cov alone returns
+# "No known vulnerabilities found" (verified 2026-08-23). Note this means the
+# RESOLVED production environment still installs pytest transitively.
 pytest-cov==4.1.0
 structlog==26.1.0
 hl7apy==1.3.5
