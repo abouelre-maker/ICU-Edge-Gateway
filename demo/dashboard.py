@@ -31,7 +31,7 @@ DEPENDENCIES
 Streamlit requires websockets<17 while the gateway's requirements.txt pins
 websockets==17.0.1. The two cannot share one environment, so the demo layer
 installs into its OWN venv (venv-demo) from requirements-demo.txt, leaving
-the validated production/test environment untouched. See requirements-demo.txt.
+the verified production/test environment untouched. See requirements-demo.txt.
 """
 
 from __future__ import annotations
@@ -291,7 +291,11 @@ ADVISORY_BANNER = (
     "<b>CLINICAL DECISION SUPPORT — ADVISORY ONLY.</b> "
     "Independent clinician review is required before any clinical action. "
     "This display does not diagnose, treat, or direct therapy. "
-    "FDA CDS Non-Device Exemption, 21 CFR §880.3780. "
+    "Designed against the non-device clinical decision support criteria in "
+    "FD&amp;C Act §520(o)(1)(E) as interpreted by FDA's Clinical Decision Support "
+    "Software guidance. The software triggers no automated treatment. This is the "
+    "developer's own determination and has not been reviewed by FDA or any "
+    "notified body. "
     "<br><b>SYNTHETIC DEMONSTRATION DATA — NOT REAL PATIENT DATA.</b>"
     "</div>"
 )
@@ -640,15 +644,29 @@ def _render_sidebar(health: dict[str, Any] | None, now: float) -> None:
             )
 
         st.markdown("### Regulatory")
+        # Wording is fixed by claude/verified_claims_sheet.md §3 (approved
+        # phrasing) and constrained by §2 (CANNOT SAY YET). Two earlier badges
+        # were removed rather than softened:
+        #   "FDA CDS Non-Device Exemption" — FDA issues no exemption; the
+        #       determination is the developer's own. Now stated as "designed
+        #       against" the criteria, which is what is actually true.
+        #   "Health Canada — Class II"     — pure self-classification. No
+        #       licence, no submission, no substitute wording that would be
+        #       defensible. Deleted outright.
+        # Do not reintroduce either, and do not cite a CFR number here
+        # (REG-CITATION-001).
         for badge in (
-            "IEC 62304 — Class B",
-            "ISO 14971 — Risk-managed",
-            "FDA CDS Non-Device Exemption",
-            "Health Canada — Class II",
+            "Engineered under IEC 62304 Class B practices",
+            "ISO 14971 risk analysis applied per hazard",
+            "Designed against non-device CDS criteria — FD&C Act §520(o)(1)(E)",
         ):
             st.markdown(
                 f"<span class='icu-badge'>{badge}</span>", unsafe_allow_html=True
             )
+        st.caption(
+            "The developer's own determinations. Not reviewed by FDA or any "
+            "notified body. No submission, clearance or licence exists."
+        )
 
 
 # ════════════════════════════════════════════════════════════════════════════

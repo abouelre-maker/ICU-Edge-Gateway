@@ -5,10 +5,10 @@
 > from the source and hoped to be accurate. Where something was not observed,
 > it says so.
 >
-> **`claude/verified_claims_sheet.md` does not exist in this repository.** It
-> was named as the source of truth for approved claims. In its absence, each
-> factual statement here cites the repository artefact or observed run that
-> supports it. Treat unattributed marketing language as absent by design.
+> **Approved claims come from [`claude/verified_claims_sheet.md`](../../claude/verified_claims_sheet.md).**
+> That sheet is the source of truth for every factual and regulatory statement
+> here. Each statement below also cites the repository artefact or observed run
+> that supports it. Treat unattributed marketing language as absent by design.
 
 ---
 
@@ -231,11 +231,25 @@ the NEWS2 `Observation`.
   appear with `dataAbsentReason` = `out-of-range` and no `valueQuantity`.
   Render that as "rejected", not as a gap.
 
-> **Regulatory note.** The emitted advisory text currently includes a CFR
-> citation whose accuracy is disputed and under review — see
-> [`regulatory/findings/REG-CITATION-001.md`](../../regulatory/findings/REG-CITATION-001.md).
-> Do not treat that string as a settled regulatory determination, and do not
-> string-match against it.
+> **Regulatory note.** The CFR citation formerly embedded in
+> `Observation.note[].text` has been **removed** from emitted output
+> (REG-CITATION-001 E1); the note now carries only the RCP 2017 attribution and
+> the advisory-only statement shown above. Verified in
+> [`evidence/mllp_smoke_100.txt`](evidence/mllp_smoke_100.txt), which records
+> the distinct emitted note text across 100 messages and an explicit
+> `'880.3780' present: False` check. The wider citation question remains open —
+> see [`regulatory/findings/REG-CITATION-001.md`](../../regulatory/findings/REG-CITATION-001.md).
+> Do not string-match against the note text.
+>
+> The gateway's regulatory posture, stated in full and approved wording:
+>
+> The gateway is engineered under IEC 62304 Class B software life-cycle practices with ISO 14971 risk
+> analysis applied to each hazard, and is designed against the non-device clinical decision support
+> criteria in FD&C Act §520(o)(1)(E) as interpreted by FDA's Clinical Decision Support Software
+> guidance. Output is advisory only and requires independent clinician review; the software triggers
+> no automated treatment. These are the developer's own determinations and have not been reviewed by
+> FDA or any notified body.
+
 
 ---
 

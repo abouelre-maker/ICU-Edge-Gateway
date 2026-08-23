@@ -211,9 +211,8 @@ talking, while narrating the previous beat.
 
 **Say:**
 
-> "Built to IEC 62304 Class B process with an ISO 14971 risk file. 816
-> automated tests, including regulatory tests that lock the NEWS2 boundaries
-> against drift.
+> "816 automated tests, including regulatory tests that lock the NEWS2
+> boundaries against drift.
 >
 > To be straight with you: this is a verified reference implementation, not a
 > cleared device. The regulatory pathway is documented and open — that's a
@@ -222,12 +221,22 @@ talking, while narrating the previous beat.
 > What I'd like is two hours with your integration team and one real monitor
 > feed."
 
-**If asked "is it FDA approved?" — answer directly:**
+**If asked "is it FDA approved?" — answer "No", then give the approved wording.**
 
-> "No. It's engineered against the CDS non-device exemption criteria and the
-> analysis is written up, but the determination isn't made and one of our own
-> citations is currently under review. I'd rather show you the open file than
-> claim a clearance we don't have."
+This paragraph is the *only* approved statement of regulatory posture
+(`claude/verified_claims_sheet.md` §3). Say it as written; do not paraphrase it,
+and do not cite a CFR number:
+
+> The gateway is engineered under IEC 62304 Class B software life-cycle practices with ISO 14971 risk
+> analysis applied to each hazard, and is designed against the non-device clinical decision support
+> criteria in FD&C Act §520(o)(1)(E) as interpreted by FDA's Clinical Decision Support Software
+> guidance. Output is advisory only and requires independent clinician review; the software triggers
+> no automated treatment. These are the developer's own determinations and have not been reviewed by
+> FDA or any notified body.
+
+Then add: "one of our own citations is under review and the finding is open in
+the repository — I'd rather show you the open file than claim a clearance we
+don't have."
 
 That answer wins more rooms than a confident overstatement, and it is the only
 one that survives diligence.

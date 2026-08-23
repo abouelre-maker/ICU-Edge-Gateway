@@ -2,13 +2,13 @@
   "openapi": "3.1.0",
   "info": {
     "title": "ICU Edge-to-FHIR Interoperability Gateway",
-    "description": "**SaMD Middleware** \u00e2\u20ac\u201d Transforms legacy ICU monitor data (HL7 v2.x) into FHIR R4 Bundles with embedded NEWS2 clinical scoring.\n\n**Regulatory:** IEC 62304 Class B \u00c2\u00b7 ISO 14971 \u00c2\u00b7 FDA CDS Non-Device Exemption \u00c2\u00b7 Health Canada Class II.\n\n**Standards:** HL7 FHIR R4 \u00c2\u00b7 LOINC \u00c2\u00b7 SNOMED CT \u00c2\u00b7 UCUM \u00c2\u00b7 RCP NEWS2 2017.",
+    "description": "**SaMD Middleware** \u2014 Transforms legacy ICU monitor data (HL7 v2.x) into FHIR R4 Bundles with embedded NEWS2 clinical scoring.\n\n**Regulatory:** Engineered under IEC 62304 Class B software life-cycle practices with ISO 14971 risk analysis applied to each hazard; designed against the non-device clinical decision support criteria in FD&C Act \u00a7520(o)(1)(E) as interpreted by FDA's Clinical Decision Support Software guidance. Output is advisory only and requires independent clinician review; the software triggers no automated treatment. These are the developer's own determinations and have not been reviewed by FDA or any notified body.\n\n**Standards:** HL7 FHIR R4 \u00b7 LOINC \u00b7 SNOMED CT \u00b7 UCUM \u00b7 RCP NEWS2 2017.",
     "contact": {
       "name": "Housam Abouelreish",
       "url": "https://linkedin.com/in/housam-abouelreish-805352226"
     },
     "license": {
-      "name": "Proprietary \u00e2\u20ac\u201d IEC 62304 Class B SaMD"
+      "name": "Proprietary \u2014 IEC 62304 Class B SaMD"
     },
     "version": "1.0.0"
   },
@@ -33,7 +33,7 @@
             }
           },
           "503": {
-            "description": "Gateway is degraded \u00e2\u20ac\u201d consult components field."
+            "description": "Gateway is degraded \u2014 consult components field."
           }
         }
       }
@@ -149,7 +149,7 @@
             "description": "Invalid HL7 message or missing required content."
           },
           "500": {
-            "description": "Unexpected internal error \u00e2\u20ac\u201d consult gateway logs."
+            "description": "Unexpected internal error \u2014 consult gateway logs."
           }
         },
         "requestBody": {
@@ -193,7 +193,7 @@
             }
           },
           "422": {
-            "description": "Validation error \u00e2\u20ac\u201d missing fields or invalid values."
+            "description": "Validation error \u2014 missing fields or invalid values."
           },
           "500": {
             "description": "Unexpected internal error."
@@ -346,7 +346,7 @@
           "C"
         ],
         "title": "AVPULevel",
-        "description": "AVPU Scale \u00e2\u20ac\u201d Level of Consciousness.\n\nRCP NEWS2 2017: Any deviation from Alert \u00e2\u20ac\u201d including new confusion (C) \u00e2\u20ac\u201d\nscores 3 points regardless of cause.\nISO 14971 HAZARD-CON-001: Incorrect AVPU assignment causes NEWS2\nunderestimation. Mitigation: explicit enum prevents free-text encoding."
+        "description": "AVPU Scale \u2014 Level of Consciousness.\n\nRCP NEWS2 2017: Any deviation from Alert \u2014 including new confusion (C) \u2014\nscores 3 points regardless of cause.\nISO 14971 HAZARD-CON-001: Incorrect AVPU assignment causes NEWS2\nunderestimation. Mitigation: explicit enum prevents free-text encoding."
       },
       "ComponentHealth": {
         "properties": {
@@ -421,7 +421,7 @@
           "components"
         ],
         "title": "HealthResponse",
-        "description": "Liveness and readiness response payload.\n\nIEC 62304 \u00c2\u00a75.8: All fields are observable at runtime \u00e2\u20ac\u201d used by\nclinical IT monitoring dashboards to detect degraded service."
+        "description": "Liveness and readiness response payload.\n\nIEC 62304 \u00a75.8: All fields are observable at runtime \u2014 used by\nclinical IT monitoring dashboards to detect degraded service."
       },
       "MonitorVendor": {
         "type": "string",
@@ -434,7 +434,7 @@
           "GENERIC"
         ],
         "title": "MonitorVendor",
-        "description": "ICU monitor vendors whose HL7 v2.x dialects are explicitly supported.\n\nIEC 62304: SOUP declaration \u00e2\u20ac\u201d each vendor produces HL7 v2.x with\nnon-standard extensions. Parser behavior varies per vendor.\nISO 14971 HAZARD-PROTO-001: Unknown vendor \u00e2\u2020\u2019 GENERIC fallback parser;\nnon-standard OBX segments may be silently dropped."
+        "description": "ICU monitor vendors whose HL7 v2.x dialects are explicitly supported.\n\nIEC 62304: SOUP declaration \u2014 each vendor produces HL7 v2.x with\nnon-standard extensions. Parser behavior varies per vendor.\nISO 14971 HAZARD-PROTO-001: Unknown vendor \u2192 GENERIC fallback parser;\nnon-standard OBX segments may be silently dropped."
       },
       "SpO2Scale": {
         "type": "string",
@@ -443,7 +443,7 @@
           "SCALE_2"
         ],
         "title": "SpO2Scale",
-        "description": "NEWS2 defines two mutually exclusive SpO2 scoring scales.\n\nRCP NEWS2 2017 \u00c2\u00a72.4: Scale 2 MUST only be used for patients with a confirmed\ndiagnosis of hypercapnic respiratory failure (e.g., COPD type 2).\nA clinician must explicitly assign Scale 2 \u00e2\u20ac\u201d it must NEVER be inferred\nfrom SpO2 values alone.\n\nISO 14971 HAZARD-SPO2-001: Incorrect scale assignment is a patient safety\ndefect. Default is SCALE_1 to ensure conservative (higher) scoring."
+        "description": "NEWS2 defines two mutually exclusive SpO2 scoring scales.\n\nRCP NEWS2 2017 \u00a72.4: Scale 2 MUST only be used for patients with a confirmed\ndiagnosis of hypercapnic respiratory failure (e.g., COPD type 2).\nA clinician must explicitly assign Scale 2 \u2014 it must NEVER be inferred\nfrom SpO2 values alone.\n\nISO 14971 HAZARD-SPO2-001: Incorrect scale assignment is a patient safety\ndefect. Default is SCALE_1 to ensure conservative (higher) scoring."
       },
       "ValidationError": {
         "properties": {
@@ -493,7 +493,7 @@
           "value": {
             "type": "number",
             "title": "Value",
-            "description": "Numeric measurement value. For CONSCIOUSNESS type, set avpu_level instead \u00e2\u20ac\u201d value is ignored."
+            "description": "Numeric measurement value. For CONSCIOUSNESS type, set avpu_level instead \u2014 value is ignored."
           },
           "unit": {
             "$ref": "#/components/schemas/VitalSignUnit"
@@ -563,7 +563,7 @@
           "timestamp"
         ],
         "title": "VitalSignPayload",
-        "description": "Single vital sign observation from a structured JSON source.\n\nIEC 62304 REQ-API-010: Pydantic validates types and formats before domain\ncode executes \u00e2\u20ac\u201d the domain layer receives only well-formed inputs."
+        "description": "Single vital sign observation from a structured JSON source.\n\nIEC 62304 REQ-API-010: Pydantic validates types and formats before domain\ncode executes \u2014 the domain layer receives only well-formed inputs."
       },
       "VitalSignType": {
         "type": "string",
@@ -683,7 +683,7 @@
           "samples"
         ],
         "title": "VitalsIngestionRequest",
-        "description": "Full vitals payload for POST /api/v1/vitals.\n\nIEC 62304 \u00c2\u00a75.2: Top-level request entity \u00e2\u20ac\u201d contains all clinical context\nrequired to execute the full domain pipeline."
+        "description": "Full vitals payload for POST /api/v1/vitals.\n\nIEC 62304 \u00a75.2: Top-level request entity \u2014 contains all clinical context\nrequired to execute the full domain pipeline."
       }
     }
   }

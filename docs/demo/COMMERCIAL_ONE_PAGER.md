@@ -10,10 +10,10 @@ interoperability with embedded NEWS2 scoring.**
 > run; nothing is projected, benchmarked against competitors, or attributed to
 > a customer, because there are no customers and no competitive benchmarks.
 >
-> **Note on sourcing:** `claude/verified_claims_sheet.md` was designated as the
-> approved-claims source of truth but does not exist in this repository. Each
-> claim below therefore cites its own evidence inline. Anything that could not
-> be evidenced was left out rather than softened.
+> **Note on sourcing:** every claim below is drawn from
+> [`claude/verified_claims_sheet.md`](../../claude/verified_claims_sheet.md),
+> the approved-claims source of truth, and cites its own evidence inline.
+> Anything that could not be evidenced was left out rather than softened.
 
 ---
 
@@ -118,9 +118,15 @@ organised.
 
 ## Regulatory posture — stated honestly
 
-Engineered **to** IEC 62304 Class B process with an ISO 14971 risk management
-file. Design-history documents exist in `docs/` (SRS, SAD, RTM, RMF) and
-hazard analyses are recorded in source alongside the controls they justify.
+The gateway is engineered under IEC 62304 Class B software life-cycle practices with ISO 14971 risk
+analysis applied to each hazard, and is designed against the non-device clinical decision support
+criteria in FD&C Act §520(o)(1)(E) as interpreted by FDA's Clinical Decision Support Software
+guidance. Output is advisory only and requires independent clinician review; the software triggers
+no automated treatment. These are the developer's own determinations and have not been reviewed by
+FDA or any notified body.
+
+Design-history documents exist in `docs/` (SRS, SAD, RTM, RMF) and hazard
+analyses are recorded in source alongside the controls they justify.
 
 **What has not happened:** no regulatory submission, no clearance, no
 approval, no notified-body review, no clinical validation study, no
