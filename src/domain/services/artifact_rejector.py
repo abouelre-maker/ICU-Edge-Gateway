@@ -5,10 +5,35 @@ Implements signal processing filters for ICU vital sign waveforms and numeric va
   - BandpassFilter: Filters frequency bands per vital sign specification.
   - HampelFilter: Replaces outlier sample spikes using local median.
   - PhysiologicalBoundsChecker: Validates numeric values against physiological limits.
+
+ISO 14971 HAZARD-DSP-007 (found and fixed during Phase 5-Stream Section D edge-case
+sweep, not previously documented): NaN/Inf mid-array values are NOT naturally
+rejected by scipy's filtfilt/iirnotch/butter — a linear IIR filter given a NaN
+sample propagates NaN through its ENTIRE output (feedback spreads it), and the
+pre-existing empty/too-short-signal guards below did not previously check for
+this. Rather than let a NaN/Inf sample silently produce a NaN/Inf-contaminated
+"cleaned" waveform with no error raised, every filter below now explicitly
+rejects non-finite input up front (_require_finite), consistent with — and
+raising the SAME ValueError type as — the pre-existing empty/too-short guards,
+so the existing signal_processor.py orchestration (try/except ValueError per
+stage, degrade-and-log) handles this exactly like any other stage rejection,
+with no orchestration-level change required. See
+tests/unit/test_artifact_rejector.py::TestNonFiniteRejection.
+
+ISO 14971 HAZARD-DSP-007 (scalar path, same finding): PhysiologicalBoundsChecker
+previously compared NaN against its bounds with plain `<`/`>` — which are always
+False for NaN in Python/IEEE-754, so a NaN scalar value was silently reported as
+"within physiological bounds" (ok=True) and would have been selected as a valid
+NEWS2 scoring input by NEWS2Calculator._extract_value() (news2_calculator.py),
+which filters ONLY on that flag. Fixed below: NaN is now explicitly rejected
+(ok=False) before any bound comparison, for every VitalSignType including those
+with no configured bounds. This is the more safety-critical half of this
+finding — Inf was already correctly rejected (Inf > high is True), NaN was not.
 """
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -16,6 +41,20 @@ from scipy.signal import butter, filtfilt, group_delay, iirnotch
 
 from domain.entities.vital_sign import VitalSignType
 from domain.interfaces.i_filter_strategy import IFilterStrategy
+
+
+def _require_finite(signal: np.ndarray, filter_name: str) -> None:
+    """
+    ISO 14971 HAZARD-DSP-007: reject NaN/Inf anywhere in the array before any
+    filter touches it. See module docstring — without this, a single non-finite
+    sample silently contaminates the ENTIRE filtfilt output via IIR feedback,
+    with no exception raised.
+    """
+    if not np.all(np.isfinite(signal)):
+        raise ValueError(
+            f"{filter_name}: signal contains NaN or Inf value(s) — rejected "
+            "whole-array (ISO 14971 HAZARD-DSP-007), never silently filtered."
+        )
 
 
 @dataclass(frozen=True)
@@ -33,6 +72,7 @@ class DualNotchFilter(IFilterStrategy):
             raise ValueError("Signal too short for notch filter processing.")
         if sampling_rate_hz <= 0:
             raise ValueError("Sampling rate must be positive.")
+        _require_finite(signal, "DualNotchFilter")
 
         nyquist = sampling_rate_hz / 2.0
         output = signal.astype(np.float64, copy=True)
@@ -75,12 +115,33 @@ class BandpassFilter:
     def apply(self, signal: np.ndarray, sampling_rate_hz: float) -> np.ndarray:
         if len(signal) == 0:
             raise ValueError("Cannot apply bandpass filter to empty signal.")
+        _require_finite(signal, "BandpassFilter")
 
         low, high = _BANDPASS_RANGES[self.vital_sign_type]
         nyquist = sampling_rate_hz / 2.0
 
         if high >= nyquist:
             high = nyquist * 0.95
+
+        # ISO 14971 HAZARD-DSP-007: at an implausibly low sampling_rate_hz,
+        # nyquist collapses toward 0 and the clamp above can push `high`
+        # below (or equal to) `low`, producing an inverted/degenerate band.
+        # scipy.signal.butter DOES raise ValueError for this ("Wn[0] must be
+        # less than Wn[1]"), so this already fails closed rather than
+        # producing a silently-wrong filter — this explicit check exists
+        # only to give that failure a domain-specific message instead of
+        # relying on scipy's internal wording, which callers should not
+        # depend on. See tests/unit/test_artifact_rejector.py::
+        # TestSamplingRateExtremes.
+        if low >= high:
+            raise ValueError(
+                f"sampling_rate_hz={sampling_rate_hz} is too low for "
+                f"{self.vital_sign_type.name}'s passband ({low}-"
+                f"{_BANDPASS_RANGES[self.vital_sign_type][1]} Hz) — the "
+                f"Nyquist-clamped upper edge ({high:.6g} Hz) is not above "
+                f"the lower edge ({low} Hz). Rejected rather than passed to "
+                "a degenerate filter design."
+            )
 
         min_len = 3 * self.order
         if len(signal) <= min_len:
@@ -147,6 +208,7 @@ class HampelFilter(IFilterStrategy):
     def apply_with_mask(self, signal: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         if len(signal) == 0:
             raise ValueError("Cannot apply Hampel filter to empty signal.")
+        _require_finite(signal, "HampelFilter")
 
         n = len(signal)
         output = signal.astype(np.float64, copy=True)
@@ -189,6 +251,20 @@ class PhysiologicalBoundsChecker:
     """Validates numeric vital signs against safety boundaries."""
 
     def check(self, vital_sign_type: VitalSignType, value: float) -> tuple[bool, str]:
+        # ISO 14971 HAZARD-DSP-007: `NaN < low` and `NaN > high` are BOTH
+        # always False (IEEE-754), so the range check below silently
+        # reports NaN as "within bounds" if not caught first — NaN must be
+        # rejected explicitly, checked before the "no bounds configured"
+        # early return too (a NaN scalar is a data-corruption signal
+        # regardless of whether this type has physiological bounds
+        # configured). See module docstring and
+        # tests/unit/test_artifact_rejector.py::TestNonFiniteRejection.
+        if math.isnan(value):
+            return False, (
+                f"Value is NaN for {vital_sign_type.name} — rejected as "
+                "instrument/parsing error, never treated as in-bounds."
+            )
+
         # تم التأكد من أن الإرجاع هو نص فارغ "" وليس None
         if vital_sign_type not in _PHYSIOLOGICAL_BOUNDS:
             return True, ""

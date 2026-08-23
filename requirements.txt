@@ -1,8 +1,78 @@
-numpy
-scipy
-pytest
-pytest-cov
-structlog
-hl7apy
-fastapi
-uvicorn
+# All packages in this file are pinned exactly (==) -- unpinned deps caused a
+# production CI failure investigated 2026-08-14 (bare `numpy`/`scipy`/etc.
+# resolved to different versions on Python 3.11 vs 3.13, and drifted over
+# time even on the same interpreter within a single session), see
+# HAZARD-STREAM-013. Versions below were the exact resolution verified
+# against the full test suite on Python 3.11.9 (matching CI's pinned
+# major.minor) -- do not loosen back to bare names without re-verifying
+# the same way.
+numpy==2.4.6
+scipy==1.17.1
+# pytest==7.4.4 was REMOVED from this file on 2026-08-23. It was duplicated
+# here and in requirements-dev.txt (identical pin), which put a test
+# framework in the production dependency file and made
+# `pip-audit --requirement requirements.txt` scan it as production SOUP.
+# Nothing under src/ imports pytest at runtime, and CI confirms /app/tests
+# is absent from the built image.
+#
+# pytest-cov BELOW IS STILL HERE, DELIBERATELY NOT REMOVED IN THAT CHANGE --
+# the authorised edit covered pytest only. It is equally test-only and
+# equally duplicated in requirements-dev.txt:3, so it is a live question
+# whether it should follow pytest out of this file. It does NOT reintroduce
+# the advisory: pytest-cov==4.1.0 requires `pytest>=4.6`, which resolves to a
+# fixed pytest, and `pip-audit -r` against pytest-cov alone returns
+# "No known vulnerabilities found" (verified 2026-08-23). Note this means the
+# RESOLVED production environment still installs pytest transitively.
+pytest-cov==4.1.0
+structlog==26.1.0
+hl7apy==1.3.5
+fastapi==0.141.1
+uvicorn==0.52.3
+# SOUP (IEC 62304 §8.1.2): paho-mqtt==2.1.0 (Eclipse Foundation MQTT client).
+# Pinned exact version per Phase 5 Section A (edge->cloud MQTT publisher).
+# Vetting note (2026-08-09): Endor Labs automated SCA review could not run in
+# this environment (no endorctl configured) and returned an evidence-limited
+# NOT_RECOMMENDED verdict -- an absence of evidence, not a finding against the
+# package. Substituted manual web research found no CVEs against the Python
+# client (the one 2025 Paho CVE, CVE-2025-10543, affects only the Go client,
+# paho.mqtt.golang) and an actively maintained upstream. This is a WEB-SOURCED,
+# NOT ENDOR-VERIFIED SOUP determination -- flagged for human re-verification
+# against a proper SCA tool before production sign-off. See
+# src/infrastructure/streaming/mqtt_publisher.py module docstring.
+paho-mqtt==2.1.0
+# SOUP (IEC 62304 §8.1.2): httpx==0.25.2 (Encode). Promoted from a
+# requirements-dev.txt test-only dependency to a production runtime
+# dependency per Phase 5 Section A (FHIR R4 Subscription rest-hook
+# delivery needs an async HTTP client). Version unchanged from what this
+# repo's entire existing test suite already exercises via
+# tests/conftest.py's ASGI test client -- not bumped to the newer 0.28.1
+# upstream release as part of this change.
+# Vetting note (2026-08-09): Endor Labs automated SCA review could not run
+# in this environment (same constraint as paho-mqtt above). Manual web
+# research: the one CVE found, CVE-2021-41945 (an SSRF-adjacent input-
+# validation issue in httpx.URL.copy_with), was fixed in 0.23.0 -- this
+# pin is unaffected. WEB-SOURCED, NOT ENDOR-VERIFIED -- flagged for human
+# re-verification before production sign-off. See
+# src/infrastructure/streaming/subscription_dispatcher.py module docstring.
+httpx==0.25.2
+# SOUP (IEC 62304 §8.1.2): cryptography==50.0.0 (Python Cryptographic
+# Authority / pyca). New Phase 5 Section B production runtime dependency --
+# used ONLY for local ECDSA keypair generation and CSR construction as part
+# of the device-identity enrollment/bootstrap feature
+# (infrastructure/provisioning/device_identity.py). This process never
+# parses attacker-controlled ciphertext with this library (no PKCS#7/CMS
+# decryption path is used), so the library's most sensitive attack surface
+# is not exercised here.
+# Vetting note (2026-08-09): the Endor Labs dependency-reviewer agent could
+# not obtain live evidence in this environment (endorctl not installed / no
+# Endor MCP tools registered -- same constraint already documented for
+# paho-mqtt and httpx above) and returned no CVE/maintenance/license
+# evidence. Manual web research: 50.0.0 (released 2026-07-31) is pyca's
+# current release and itself FIXES CVE-2026-69247 (a PKCS#7 EnvelopedData
+# timing/Bleichenbacher-oracle issue in decrypt paths this module does not
+# use); no unfixed CVEs were found against 50.0.0. BSD-3-Clause/Apache-2.0
+# dual-licensed, actively maintained. This is a WEB-SOURCED, NOT
+# ENDOR-VERIFIED SOUP determination -- flagged for human re-verification
+# against Endor (or an equivalent SCA tool) before production sign-off,
+# same as the other two SOUP entries in this file.
+cryptography==50.0.0
