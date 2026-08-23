@@ -8,14 +8,16 @@ table with evidence beside it, it does not go in front of a buyer.
 claims. One overstatement discovered discredits the twenty accurate ones next to it. The asset's real
 strength is the evidence discipline behind it — the marketing must not undercut the thing it sells.
 
-**Status:** reconciled against the repository after Phase 9, re-verified after the 2026-08-22 power-outage
-recovery check, and re-run on 2026-08-23: 816 passed / 1 xfailed, 95% coverage (2302 statements, 124 missed)
-on venv311 (Python 3.11.9); `ruff check .` clean; `mypy src` clean across 46 files; OpenAPI whole-spec
-identical to the committed offline copy. **37 commits on the working branch / 47 total** — measured
-2026-08-23 with `git rev-list --count main..HEAD` and `--count HEAD`. The earlier "33 / 43" was recorded
-before the four 2026-08-22 recovery commits (`435d004`, `2650130`, `672e1f1`, `c61c367`) landed, and "19"
-before that; this is the third time this figure has gone stale, so re-measure it rather than quoting it.
-Pushed 2026-08-23: the branch went from `94cbe08` to `74a6a02` (25 commits), then `fec2259` and `29ec3eb` on top. Open as PR #1. Not merged.
+**Status:** **MERGED TO `main` 2026-08-23** via merge commit `c143037` (PR #1, a true merge commit with two
+parents — the 43 individually-evidenced commits are preserved on `main`, deliberately not squashed, because that
+granular history is the IEC 62304 traceability trail). `main` now carries 53 commits; the remote feature branch
+`phase5/streaming-mllp-listener` has been deleted. Verified on `main` after the merge: **816 passed / 1 xfailed**,
+**95% coverage** (2302 statements, 124 missed; CI reports the same measurement as 94.61%), `ruff check .` clean,
+`mypy src` clean across 46 files. CI on `main`: Quality Gate **green** (Ruff, Mypy, Bandit, pip-audit, pytest all
+pass), Docker Verify **green**, Docker Build **fails on image size only** — the known, tracked GAP-DOCKER-SIZE-001,
+not a regression from the merge. Four items remain open: **GAP-DOCKER-SIZE-001** (372 MB vs the 150 MB edge budget),
+**REG-CITATION-001** beyond site E1, **HAZARD-DSP-007** awaiting sign-off, and **FLAKE-MQTT-001**. Commit counts in
+this sheet have gone stale three times — re-measure with `git rev-list --count HEAD` rather than quoting.
 
 ---
 
