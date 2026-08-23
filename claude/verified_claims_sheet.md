@@ -23,8 +23,8 @@ Pushed 2026-08-23: the branch went from `94cbe08` to `74a6a02` (25 commits), the
 
 | Claim | Evidence | Verified how |
 |---|---|---|
-| **816 automated tests passing, 1 xfailed** | Full suite | `pytest -q` / `pytest --cov=src`, re-run 2026-08-23 on venv311. **LOCAL-ONLY — not yet CI-confirmed.** The pytest step has never *passed* in CI: skipped in two runs (`89b0227` and `74a6a02`, where an earlier step failed first) and executed-but-failed in one (`94cbe08`, 2026-08-14 — 3 failed / 594 passed, the since-fixed HAZARD-DSP-007 NaN defects). Do not describe this number as CI-verified until a CI run actually runs it |
-| **95% statement coverage of `src/`** | 2302 statements, 124 missed | `pytest --cov` |
+| **816 automated tests passing, 1 xfailed** | Full suite | Local (`pytest --cov=src`, venv311 / Python 3.11.9) **and CI-CONFIRMED 2026-08-23** on commit `fa0c61e` — [run](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32634489719): `816 passed, 1 xfailed` in 30.01s on a clean ubuntu-latest runner, coverage gate of 90% met. This is the first CI run in which the pytest step completed green; the three before it either skipped it or failed it |
+| **95% statement coverage of `src/`** | 2302 statements, 124 missed | `pytest --cov` locally and **CI-confirmed 2026-08-23** — [run](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32634489719) reports **94.61%**, which is the same measurement: 124/2302 missed is 94.61%, which pytest-cov's terminal summary rounds to 95%. Quote either, but do not quote 95% as if it were a separate, higher figure |
 | **Zero-regression discipline across six phases** | 667 → 709 → 744 → 816, baseline held at every gate | Recorded per phase |
 | **Static analysis clean** | `ruff check .` clean repo-wide; `mypy src` success across 46 files; Bandit clean at severity floor `low` | Local run **and CI-confirmed 2026-08-23** on commit `74a6a02` — [run](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32631860663): Ruff, Mypy and Bandit steps all green on a clean ubuntu-latest runner |
 | Real-time **HL7 v2.5.1 ORU^R01** ingestion over **MLLP** (VT/FS/CR framing, 1 MiB cap, AA/AE ACK, malformed message NAKs without dropping the connection) | `mllp_listener.py` + integration tests | Driven live with real framed messages |
@@ -63,7 +63,7 @@ HL7 v2.5.1 · FHIR R4.
 | "Health Canada Class II" | Self-classification. No licence, no submission | A Medical Device Licence application |
 | "Clinically validated" | **Zero real patient data. Zero traffic from a real monitor.** Every message so far is synthetic. The regulatory tests prove conformance to the RCP 2017 *specification* — a different and lesser claim | A pilot on real HL7 traffic, then a retrospective accuracy study |
 | "Production-ready" | No deployment has happened. TLS/mTLS, authn/z, CORS lock-down (currently `allow_origins=["*"]`), persistence and audit-log retention are all absent | Deploy it somewhere real under those controls |
-| **Image size and layer count** | Still unquotable. The image now builds in CI, but `docker-verify.yml` writes size and layer count only to `$GITHUB_STEP_SUMMARY`, never to stdout, so neither figure has been read out yet. Boot time, non-root operation and the demo-layer exclusion have moved to §1 and are quotable | Read them off the run's web summary, or let `ci.yml`'s `docker-build` job run — it echoes the size to stdout, and was skipped on 2026-08-23 only because the quality gate failed ahead of it |
+| **"Edge-optimized" / "lightweight footprint"** — and any favourable image-size claim | **GAP-DOCKER-SIZE-001.** The image measures **372 MB against the project's own 150 MB edge-deployment limit** — `docker-build (size-limited)` **FAILS** in CI ([run](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/runs/32634489719)), while `docker-verify` (behaviour) **PASSES** on the same image. Not yet re-architected. The size had never been measured before 2026-08-23 because that job was skipped in every earlier run; it is a first measurement, not a regression. Layer count still unread | A multi-stage build or the `Dockerfile.slim` rework on `python:3.11-slim`, **or** a deliberate re-baseline of the edge budget with written rationale. Changing the base image alters the SOUP inventory, so it needs sign-off. See `regulatory/findings/GAP-DOCKER-SIZE-001.md` |
 | Throughput at ICU density | Never load-tested beyond a single laptop | A load test with published methodology |
 | Cloud deployment | Terraform is committed but **never applied**; no AWS credentials, no `terraform plan` | `terraform apply` against a real account |
 | "`run_demo.bat` works" | Only its guard logic was exercised. The success path is untested on Windows | Run it end to end once |
@@ -109,6 +109,10 @@ buyers in this market are unusually receptive to it.
 5. One timing-sensitive async test (`test_failed_item_is_requeued_not_dropped`, FLAKE-MQTT-001) failed
    once under CPU contention and passed on every subsequent run. Recorded and left unexplained rather
    than silenced by loosening the assertion.
+7. **The production image is 372 MB against our own 150 MB edge budget (GAP-DOCKER-SIZE-001).** It builds, runs
+   non-root, and passes every behavioural assertion in CI — and it is 2.5× the footprint the "edge-optimized"
+   positioning implies. Volunteer the number with the behavioural evidence; quoting one without the other is
+   exactly the selective disclosure this sheet exists to prevent.
 6. **`pytest==7.4.4` carries `PYSEC-2026-1845` (fixed in 9.0.3), and the test toolchain still runs it.**
    On 2026-08-23 the pin was removed from `requirements.txt`, where it never belonged — pytest is a
    test-only tool, it is absent from the production image (CI confirms `/app/tests` is not in the

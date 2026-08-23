@@ -50,10 +50,16 @@ gid=1001`; it accepts connections after 5 s with `HEALTHCHECK` healthy after 2 s
 200 with `X-CDS-Advisory-Only: true`, `application/fhir+json`, and a 9-entry Bundle
 carrying the NEWS2 Observation. Ruff, Mypy and Bandit are green on a clean runner.
 
-**Still NOT verified.** *Image size and layer count* remain unquotable: `docker-verify.yml`
-writes them only to `$GITHUB_STEP_SUMMARY`, never to stdout, so they are not in the log.
-`ci.yml`'s `docker-build` job does echo the size to stdout, but it was **skipped** because
-the quality gate failed ahead of it.
+**GAP-DOCKER-SIZE-001 — the image is 372 MB against a 150 MB limit.** Once the quality gate
+went green (commit `fa0c61e`), `ci.yml`'s `docker-build` job ran for the first time and
+measured the image: **372 MB, 2.5× the project's own edge-deployment budget**, so that job
+**FAILS**. `docker-verify` passes on the same image — it asserts behaviour, not size. The
+size had never been measured before, because that job was skipped in every earlier run; this
+is a first measurement, not a regression. Merged with the gap tracked, not fudged. Layer
+count still unread. See `regulatory/findings/GAP-DOCKER-SIZE-001.md`.
+
+**`pytest` has now passed in CI** (`fa0c61e`: 816 passed, 1 xfailed, 30.01s, 94.61% coverage),
+so the 816 / 1 figure is CI-confirmed and no longer local-only.
 
 **The CI failure is not a regression from this branch.** All three runs to date failed at a
 *different* step — `89b0227` at Bandit, `94cbe08` at pytest (the since-fixed HAZARD-DSP-007
