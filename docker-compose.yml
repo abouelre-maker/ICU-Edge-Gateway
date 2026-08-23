@@ -1,0 +1,117 @@
+# =============================================================================
+# ICU Edge Gateway — Local Development Compose
+# Phase 5-Stream Section C.
+#
+# Exercises the FULL device<->control-plane protocol end-to-end against a
+# real network (not in-process/ASGITransport, see
+# tests/integration/test_mock_control_plane_contract.py for that) plus a
+# multi-vendor HL7 monitor simulator against a real MLLP TCP socket.
+#
+# NOT for production. mock-control-plane (deploy/local/mock_control_plane)
+# has no real security -- see its own docstring. The CA it mints is
+# regenerated every container start and never persisted.
+#
+# `docker compose up` starting order: mock-control-plane (health-checked)
+# -> ca-bundle-fetcher (one-shot, writes the mock CA's public cert into the
+# shared ca-bundle volume -- see its own comment below for why `curl -k` is
+# used ONLY for this one bootstrap fetch) -> gateway (waits for both) ->
+# hl7-monitor-simulator (waits for gateway's MLLP port).
+# =============================================================================
+
+services:
+  mock-control-plane:
+    build:
+      context: ./deploy/local/mock_control_plane
+    environment:
+      MOCK_VALID_ENROLLMENT_TOKENS: "dev-token-001,dev-token-002,dev-token-003"
+    healthcheck:
+      # Plain HTTP, port 8080 (app.py's _start_plain_info_server) -- NOT
+      # the HTTPS protocol port (8443). No TLS-verification-disabling code
+      # anywhere in this file; see app.py's _PlainInfoHandler docstring
+      # for why the CA-bundle/health info listener is deliberately a
+      # separate unauthenticated plain-HTTP server rather than a `curl -k`
+      # against the real protocol port.
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8080/health',timeout=3).status==200 else 1)"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  # One-shot init step: fetches the mock control plane's CA public cert
+  # (plain HTTP, port 8080 -- see mock-control-plane's healthcheck comment
+  # above for why) and writes it into the ca-bundle volume, at the SAME
+  # path PROVISIONING_CA_BUNDLE_PATH points the gateway at. This mirrors,
+  # for local dev, the k3s manifest's rule (deploy/k3s/edge-appliance.yaml)
+  # that the CA bundle and the enrollment token reach a device through one
+  # coordinated out-of-band process -- here, that process is "compose
+  # starts this container before the gateway, from the same trust root the
+  # mock control plane itself just minted," rather than a human copying a
+  # file by hand.
+  ca-bundle-fetcher:
+    image: curlimages/curl:8.8.0
+    depends_on:
+      mock-control-plane:
+        condition: service_healthy
+    volumes:
+      - ca-bundle:/ca-bundle
+    entrypoint:
+      - sh
+      - -c
+      - "curl -sf http://mock-control-plane:8080/ca-bundle.pem -o /ca-bundle/ca_bundle.pem && echo 'CA bundle fetched.'"
+    restart: "no"
+
+  gateway:
+    build:
+      context: .
+    depends_on:
+      ca-bundle-fetcher:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+      - "2575:2575"
+    environment:
+      MLLP_ENABLED: "true"
+      MLLP_HOST: "0.0.0.0"
+      MLLP_PORT: "2575"
+      PROVISIONING_ENABLED: "true"
+      PROVISIONING_BOOTSTRAP_URL: "https://mock-control-plane:8443"
+      # Same token the mock control plane's MOCK_VALID_ENROLLMENT_TOKENS
+      # seeds above -- local-dev convenience only (see
+      # config.get_enrollment_token()'s docstring: production should use
+      # ENROLLMENT_TOKEN_FILE from a mounted Secret, not a plain env var --
+      # deploy/k3s/edge-appliance.yaml does that; this compose file
+      # prioritizes a zero-setup `docker compose up` over that hardening,
+      # which is acceptable for local dev only).
+      ENROLLMENT_TOKEN: "dev-token-001"
+      DEVICE_COMMON_NAME: "local-dev-gateway-001"
+      CERT_STORE_PATH: "/var/lib/icu-edge-gateway/pki"
+      PROVISIONING_CA_BUNDLE_PATH: "/ca-bundle/ca_bundle.pem"
+      PROVISIONING_MAX_ENROLL_ATTEMPTS: "5"
+      # Short interval for local dev so the reattestation_loop() wiring
+      # (see infrastructure/provisioning/reattestation.py) is actually
+      # observable in logs within a normal `docker compose up` session,
+      # rather than waiting the production default (3600s) to see one tick.
+      REATTESTATION_INTERVAL_SECONDS: "30"
+    volumes:
+      - ca-bundle:/ca-bundle:ro
+      - gateway-pki:/var/lib/icu-edge-gateway/pki
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8000/health',timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  hl7-monitor-simulator:
+    build:
+      context: ./deploy/local/hl7_monitor_simulator
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      GATEWAY_MLLP_HOST: "gateway"
+      GATEWAY_MLLP_PORT: "2575"
+      SIMULATOR_INTERVAL_SECONDS: "5"
+
+volumes:
+  ca-bundle:
+  gateway-pki:

@@ -313,6 +313,136 @@ class TestVitalsEndpointSuccess:
 
 
 @pytest.mark.integration
+class TestVitalsHazardDsp007NanExcludedNotOpaqueFailure:
+    """
+    ISO 14971 HAZARD-DSP-007, response-shape confirmation: when one vital
+    sign is invalid (here, SpO2 = NaN) and NEWS2 therefore cannot be
+    computed (NEWS2InsufficientDataError, caught internally by
+    VitalsOrchestrator.analyse() -- see vitals_orchestrator.py, never
+    propagated as an HTTP error), the caller must still receive every OTHER
+    valid vital sign's Observation, PLUS an explicit, addressable indication
+    of which parameter was invalid and why NEWS2 was not computed -- NOT an
+    opaque request failure that also hides the good data. Going from "wrong
+    score" (the pre-fix hazard) to "no information at all" would itself be
+    a usability/availability regression, distinct from the correctness
+    defect this hazard is actually about.
+    """
+
+    NAN_SPO2_PAYLOAD = {
+        "patient_id": "PT-NAN-SPO2-API",
+        "samples": [
+            {"vital_sign_type": "HEART_RATE", "value": 72.0, "unit": "bpm", "timestamp": _TS},
+            {
+                "vital_sign_type": "RESPIRATORY_RATE",
+                "value": 16.0,
+                "unit": "breaths/min",
+                "timestamp": _TS,
+            },
+            {"vital_sign_type": "SPO2", "value": float("nan"), "unit": "%", "timestamp": _TS},
+            {
+                "vital_sign_type": "SYSTOLIC_BP",
+                "value": 120.0,
+                "unit": "mmHg",
+                "timestamp": _TS,
+            },
+            {
+                "vital_sign_type": "TEMPERATURE_CELSIUS",
+                "value": 37.0,
+                "unit": "Cel",
+                "timestamp": _TS,
+            },
+        ],
+    }
+
+    async def test_returns_200_not_an_opaque_error(self, client: AsyncClient) -> None:
+        response = await client.post("/api/v1/vitals", json=self.NAN_SPO2_PAYLOAD)
+        assert response.status_code == 200
+
+    async def test_all_four_valid_observations_are_still_present_with_values(
+        self, client: AsyncClient
+    ) -> None:
+        response = await client.post("/api/v1/vitals", json=self.NAN_SPO2_PAYLOAD)
+        entries = response.json()["entry"]
+        by_text = {
+            e["resource"]["code"]["text"]: e["resource"]
+            for e in entries
+            if e["resource"]["resourceType"] == "Observation"
+        }
+        for text, expected_value in (
+            ("Heart rate", 72.0),
+            ("Respiratory rate", 16.0),
+            ("Systolic blood pressure", 120.0),
+            ("Body temperature", 37.0),
+        ):
+            assert text in by_text, f"{text} Observation must still be present."
+            assert by_text[text]["valueQuantity"]["value"] == expected_value
+
+    async def test_spo2_observation_present_but_flagged_data_absent(
+        self, client: AsyncClient
+    ) -> None:
+        response = await client.post("/api/v1/vitals", json=self.NAN_SPO2_PAYLOAD)
+        entries = response.json()["entry"]
+        spo2 = next(
+            e["resource"]
+            for e in entries
+            if e["resource"]["resourceType"] == "Observation"
+            and e["resource"]["code"]["text"].startswith("Oxygen saturation")
+        )
+        assert "valueQuantity" not in spo2, (
+            "The invalid SpO2 must never appear as a plain numeric value -- "
+            "HAZARD-DSP-007."
+        )
+        assert spo2["dataAbsentReason"]["coding"][0]["code"] == "out-of-range"
+
+    async def test_bundle_note_names_spo2_explicitly(
+        self, client: AsyncClient
+    ) -> None:
+        response = await client.post("/api/v1/vitals", json=self.NAN_SPO2_PAYLOAD)
+        notes = " | ".join(n["text"] for n in response.json().get("note", []))
+        assert "SPO2" in notes, (
+            "Bundle.note must explicitly name SPO2 as the excluded "
+            "parameter -- a clinician reading the Bundle directly (not "
+            "just the X-NEWS2-* headers) must be able to see why."
+        )
+        assert "NEWS2" in notes
+
+    async def test_no_news2_observation_entry_is_fabricated(
+        self, client: AsyncClient
+    ) -> None:
+        """No NEWS2 Observation entry at all -- NOT a NEWS2 entry with a
+        placeholder/zero/null score, which would be indistinguishable from
+        a genuine result at a glance."""
+        response = await client.post("/api/v1/vitals", json=self.NAN_SPO2_PAYLOAD)
+        entries = response.json()["entry"]
+        news2_entries = [
+            e
+            for e in entries
+            if e["resource"]["resourceType"] == "Observation"
+            and any(
+                c.get("code") == "1239842005"
+                for c in e["resource"].get("code", {}).get("coding", [])
+            )
+        ]
+        assert news2_entries == []
+
+    async def test_news2_headers_absent_not_zero_or_null(
+        self, client: AsyncClient
+    ) -> None:
+        """X-NEWS2-Total/X-NEWS2-Risk-Level must be ABSENT, not present with
+        a misleading placeholder value -- a caller checking header presence
+        (a common integration pattern) must see "not computed", not "0"."""
+        response = await client.post("/api/v1/vitals", json=self.NAN_SPO2_PAYLOAD)
+        assert "x-news2-total" not in response.headers
+        assert "x-news2-risk-level" not in response.headers
+
+    async def test_warning_count_header_reflects_the_exclusion(
+        self, client: AsyncClient
+    ) -> None:
+        response = await client.post("/api/v1/vitals", json=self.NAN_SPO2_PAYLOAD)
+        assert int(response.headers["x-warning-count"]) >= 2  # [ARTIFACT] + [NEWS2-INCOMPLETE]
+
+
+@pytest.mark.integration
 class TestVitalsValidationErrors:
     """POST /api/v1/vitals — Pydantic validation error scenarios (expect HTTP 422)."""
 

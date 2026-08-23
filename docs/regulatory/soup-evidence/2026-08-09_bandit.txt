@@ -1,0 +1,128 @@
+SOUP/Static-Analysis Evidence Artifact — bandit security scan
+IEC 62304 §8.1.2 — scan of src/ (includes the streaming/FHIR Subscription code touching httpx, paho-mqtt)
+Generated: 2026-08-09
+Command: bandit --recursive src/ --severity-level low --quiet
+bandit version: Version: 1.7.6
+----------------------------------------------------------------------
+Run started:2026-08-09 08:40:22.948407
+
+Test results:
+>> Issue: [B104:hardcoded_bind_all_interfaces] Possible binding to all interfaces.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-605 (https://cwe.mitre.org/data/definitions/605.html)
+   More Info: https://bandit.readthedocs.io/en/1.7.6/plugins/b104_hardcoded_bind_all_interfaces.html
+   Location: src/config.py:27:34
+26	    """MLLP_HOST (default: 0.0.0.0 � edge appliance listens for LAN-side monitors)."""
+27	    return os.getenv("MLLP_HOST", "0.0.0.0")
+28	
+
+--------------------------------------------------
+>> Issue: [B101:assert_used] Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.7.6/plugins/b101_assert_used.html
+   Location: src/domain\services\news2_calculator.py:111:8
+110	
+111	        assert rr is not None  # guaranteed by _assert_required_parameters_present
+112	        assert spo2 is not None
+
+--------------------------------------------------
+>> Issue: [B101:assert_used] Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.7.6/plugins/b101_assert_used.html
+   Location: src/domain\services\news2_calculator.py:112:8
+111	        assert rr is not None  # guaranteed by _assert_required_parameters_present
+112	        assert spo2 is not None
+113	        assert sbp is not None
+
+--------------------------------------------------
+>> Issue: [B101:assert_used] Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.7.6/plugins/b101_assert_used.html
+   Location: src/domain\services\news2_calculator.py:113:8
+112	        assert spo2 is not None
+113	        assert sbp is not None
+114	        assert hr is not None
+
+--------------------------------------------------
+>> Issue: [B101:assert_used] Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.7.6/plugins/b101_assert_used.html
+   Location: src/domain\services\news2_calculator.py:114:8
+113	        assert sbp is not None
+114	        assert hr is not None
+115	        assert temp is not None
+
+--------------------------------------------------
+>> Issue: [B101:assert_used] Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.7.6/plugins/b101_assert_used.html
+   Location: src/domain\services\news2_calculator.py:115:8
+114	        assert hr is not None
+115	        assert temp is not None
+116	
+
+--------------------------------------------------
+>> Issue: [B101:assert_used] Use of assert detected. The enclosed code will be removed when compiling to optimised byte code.
+   Severity: Low   Confidence: High
+   CWE: CWE-703 (https://cwe.mitre.org/data/definitions/703.html)
+   More Info: https://bandit.readthedocs.io/en/1.7.6/plugins/b101_assert_used.html
+   Location: src/domain\services\news2_calculator.py:195:8
+194	        avpu = most_recent.original.avpu_level
+195	        assert avpu is not None  # guaranteed by filter above
+196	        return avpu
+
+--------------------------------------------------
+>> Issue: [B104:hardcoded_bind_all_interfaces] Possible binding to all interfaces.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-605 (https://cwe.mitre.org/data/definitions/605.html)
+   More Info: https://bandit.readthedocs.io/en/1.7.6/plugins/b104_hardcoded_bind_all_interfaces.html
+   Location: src/infrastructure\streaming\mllp_listener.py:110:20
+109	        self,
+110	        host: str = "0.0.0.0",
+111	        port: int = 2575,
+112	        forward_buffer: StoreAndForwardRingBuffer[dict[str, Any]] | None = None,
+113	        adapter: HL7v2Adapter | None = None,
+114	        orchestrator: VitalsOrchestrator | None = None,
+115	        assembler: BundleAssembler | None = None,
+116	        default_spo2_scale: SpO2Scale = SpO2Scale.SCALE_1,
+117	        max_frame_bytes: int = _DEFAULT_MAX_FRAME_BYTES,
+118	        live_channel: LiveDashboardChannel | None = None,
+119	        subscription_dispatcher: SubscriptionDispatcher | None = None,
+120	    ) -> None:
+121	        self._host = host
+
+--------------------------------------------------
+>> Issue: [B104:hardcoded_bind_all_interfaces] Possible binding to all interfaces.
+   Severity: Medium   Confidence: Medium
+   CWE: CWE-605 (https://cwe.mitre.org/data/definitions/605.html)
+   More Info: https://bandit.readthedocs.io/en/1.7.6/plugins/b104_hardcoded_bind_all_interfaces.html
+   Location: src/main.py:252:13
+251	        "main:app",
+252	        host="0.0.0.0",
+253	        port=8000,
+
+--------------------------------------------------
+
+Code scanned:
+	Total lines of code: 5267
+	Total lines skipped (#nosec): 0
+	Total potential issues skipped due to specifically being disabled (e.g., #nosec BXXX): 0
+
+Run metrics:
+	Total issues (by severity):
+		Undefined: 0
+		Low: 6
+		Medium: 3
+		High: 0
+	Total issues (by confidence):
+		Undefined: 0
+		Low: 0
+		Medium: 3
+		High: 6
+Files skipped (0):
+EXIT CODE: 1

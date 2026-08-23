@@ -204,6 +204,31 @@ async def ingest_hl7(
         duration_ms=round(analysis_result.processing_duration_ms, 2),
     )
 
+    # Phase 5 Section A: live dashboard delta push + FHIR Subscription
+    # dispatch. getattr-guarded rather than a hard app.state access — both
+    # are always set by main.py's lifespan in production, but some test
+    # fixtures build a bare app.
+    live_channel = getattr(request.app.state, "live_dashboard_channel", None)
+    if live_channel is not None:
+        await live_channel.broadcast(bundle, source="http-ingest")
+
+    subscription_dispatcher = getattr(
+        request.app.state, "subscription_dispatcher", None
+    )
+    if subscription_dispatcher is not None:
+        await subscription_dispatcher.dispatch(bundle)
+
+    # ISO 14971 HAZARD-DSP-007 defense-in-depth policy, made explicit here
+    # rather than left as a silent side effect: Starlette's
+    # JSONResponse.render() calls json.dumps(..., allow_nan=False)
+    # internally (not configurable via this constructor, so there is no
+    # parameter to pass) -- a non-finite value anywhere in `bundle` fails
+    # this response with an error instead of being silently delivered. This
+    # is the SAME policy mqtt_publisher.py/subscription_dispatcher.py/
+    # live.py apply explicitly via their own json.dumps(allow_nan=False)
+    # calls (those libraries don't default this way) -- documented here so
+    # a reader auditing all four external-transmission boundaries for this
+    # policy finds it stated at each one, not silently true at only one.
     return JSONResponse(
         content=bundle,
         media_type="application/fhir+json",

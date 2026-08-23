@@ -11,7 +11,11 @@ IEC 62304 §5.3: Single-responsibility orchestrator — contains no filter logic
 ISO 14971 HAZARD-DSP-001/002/003: Controls addressed by the injected filter
 instances (DualNotchFilter / BandpassFilter / HampelFilter respectively);
 this class manages execution order and stage-boundary reclassification only
-(see HAZARD-DSP-005, HAZARD-DSP-006 below for orchestration-level findings).
+(see HAZARD-DSP-005, HAZARD-DSP-006 below for orchestration-level findings,
+and artifact_rejector.py's module docstring for HAZARD-DSP-007 — NaN/Inf
+mid-array and NaN-scalar rejection, fixed at the filter/bounds-checker level;
+this orchestrator's existing per-stage try/except ValueError degrade-and-log
+handles that rejection with no change needed here).
 """
 
 from __future__ import annotations

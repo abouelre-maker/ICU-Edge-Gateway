@@ -213,8 +213,7 @@ class NEWS2ObservationBuilder:
                     "text": (
                         "NEWS2 score calculated per RCP 2017 guidelines. "
                         "This is a clinical decision support advisory output only. "
-                        "Independent clinician review is required before any action. "
-                        "FDA CDS Non-Device Exemption applies (21 CFR §880.3780)."
+                        "Independent clinician review is required before any action."
                     )
                 }
             ],

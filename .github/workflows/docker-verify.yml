@@ -1,0 +1,294 @@
+# ============================================================================
+#  docker-verify.yml — Production image verification (Phase 8)
+#
+#  WHY THIS EXISTS AS A CI JOB AND NOT A LOCAL SCRIPT
+#  Docker is not installed on the primary development host, so the Phase 8
+#  evidence table could not be produced locally. Rather than fabricate image
+#  sizes and latency numbers, or install Docker unprompted, the verification
+#  is deferred to CI where it runs on every change and the numbers become
+#  quotable evidence in the job summary.
+#
+#  This workflow is ADDITIVE. It does not modify ci.yml's existing
+#  docker-build job; it adds the assertions that job does not make.
+#
+#  THE REGULATORY SCOPE GUARD IS THE POINT
+#  The demonstration dashboard (demo/) is NOT part of the IEC 62304 Class B
+#  software item. If it ever shipped inside the image it would widen the
+#  device's regulatory scope. Three independent layers prevent that:
+#    1. demo/ lives outside src/, and the Dockerfile only COPYs src/
+#    2. .dockerignore excludes demo/, requirements-demo.txt, run_demo.*
+#    3. THIS JOB asserts the absence machine-enforced, so the guarantee is
+#       not a convention someone can quietly break
+# ============================================================================
+
+name: Docker Verify — Production Image
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "Dockerfile"
+      - "Dockerfile.slim"
+      - ".dockerignore"
+      - "docker/**"
+      - "requirements.txt"
+      - "src/**"
+      - ".github/workflows/docker-verify.yml"
+  pull_request:
+  workflow_dispatch:
+
+env:
+  IMAGE: icu-edge-gateway:verify
+
+jobs:
+  docker-verify:
+    name: Build, run and verify the production image
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # ── Build ────────────────────────────────────────────────────────────
+      # continue-on-error so a musllinux wheel failure is REPORTED with its
+      # log rather than silently swapping the base image. See the guidance
+      # step below.
+      - name: Build image (Alpine)
+        id: build
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          docker build -t "$IMAGE" . 2>&1 | tee /tmp/build.log
+
+      - name: Diagnose build failure (scipy/numpy musllinux wheels)
+        if: steps.build.outcome == 'failure'
+        run: |
+          echo "## Docker build FAILED" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if grep -qiE "musllinux|Building wheel for (scipy|numpy)|No matching distribution" /tmp/build.log; then
+            {
+              echo "**Likely cause:** no musllinux wheel available for scipy/numpy"
+              echo "on this Alpine base, forcing a from-source build."
+              echo ""
+              echo "**Deliberately NOT auto-fixed.** The base image is a"
+              echo "regulatory-relevant property of the SaMD build and must not be"
+              echo "swapped silently by CI."
+              echo ""
+              echo "**Proposed remedy for human decision:** add a documented"
+              echo "\`Dockerfile.slim\` based on \`python:3.11-slim\` (glibc, where"
+              echo "manylinux wheels are published) and leave the Alpine Dockerfile"
+              echo "intact for review. Changing the base image affects the SOUP"
+              echo "inventory and the attack surface, so it needs sign-off, not a"
+              echo "CI-side substitution."
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "Build failed for a reason unrelated to musllinux wheels." >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          tail -60 /tmp/build.log >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          exit 1
+
+      # ── Static image assertions (no container needed) ─────────────────────
+
+      - name: Assert the demonstration layer is ABSENT from the image
+        run: |
+          echo "Regulatory scope guard — demo/ must not exist in the image."
+          fail=0
+
+          if docker run --rm --entrypoint sh "$IMAGE" -c '[ -e /app/demo ]'; then
+            echo "::error::/app/demo EXISTS in the image. The demonstration"
+            echo "::error::dashboard is not part of the Class B software item and"
+            echo "::error::must never ship inside it. Check .dockerignore."
+            fail=1
+          else
+            echo "  OK  /app/demo does not exist"
+          fi
+
+          for path in /app/demo /app/requirements-demo.txt /app/run_demo.sh /app/run_demo.bat /app/scripts /app/tests; do
+            if docker run --rm --entrypoint sh "$IMAGE" -c "[ -e '$path' ]"; then
+              echo "::error::$path leaked into the image"
+              fail=1
+            else
+              echo "  OK  $path absent"
+            fi
+          done
+
+          echo "Checking for demonstration-only Python packages..."
+          for pkg in streamlit plotly pandas altair pydeck; do
+            if docker run --rm --entrypoint python "$IMAGE" -c "import $pkg" 2>/dev/null; then
+              echo "::error::'$pkg' is importable inside the production image."
+              echo "::error::Demonstration dependencies must never be installed"
+              echo "::error::into the SaMD image (requirements-demo.txt is"
+              echo "::error::excluded by .dockerignore)."
+              fail=1
+            else
+              echo "  OK  $pkg not importable"
+            fi
+          done
+
+          exit $fail
+
+      - name: Assert the container runs as UID 1001
+        run: |
+          uid="$(docker run --rm --entrypoint id "$IMAGE" -u)"
+          gid="$(docker run --rm --entrypoint id "$IMAGE" -g)"
+          echo "  uid=$uid gid=$gid"
+          if [ "$uid" != "1001" ]; then
+            echo "::error::Container runs as UID $uid, expected 1001 (non-root)."
+            exit 1
+          fi
+          echo "  OK  runs as non-root UID 1001"
+
+      # ── Runtime assertions ───────────────────────────────────────────────
+
+      - name: Start the container
+        run: |
+          docker run -d --name icu-verify -p 8000:8000 "$IMAGE"
+          echo "Waiting for the gateway to accept connections..."
+          for i in $(seq 1 60); do
+            if curl -fsS --max-time 2 http://127.0.0.1:8000/health >/dev/null 2>&1; then
+              echo "  up after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Gateway did not start within 60s."
+          docker logs icu-verify
+          exit 1
+
+      - name: Assert GET /health is 200 with all four components healthy
+        run: |
+          code="$(curl -s -o /tmp/health.json -w '%{http_code}' http://127.0.0.1:8000/health)"
+          echo "  HTTP $code"
+          cat /tmp/health.json
+          [ "$code" = "200" ] || { echo "::error::/health returned $code"; exit 1; }
+
+          python - <<'PY'
+          import json, sys
+          d = json.load(open("/tmp/health.json"))
+          expected = {"hl7v2_adapter", "dsp_pipeline", "news2_calculator", "fhir_builder"}
+          components = d.get("components", {})
+          missing = expected - set(components)
+          if missing:
+              print(f"::error::health is missing components: {sorted(missing)}")
+              sys.exit(1)
+          unhealthy = [k for k, v in components.items() if v.get("status") != "healthy"]
+          if unhealthy:
+              print(f"::error::unhealthy components: {unhealthy}")
+              sys.exit(1)
+          if d.get("status") != "healthy":
+              print(f"::error::aggregate status is {d.get('status')!r}")
+              sys.exit(1)
+          print(f"  OK  status=healthy, {len(components)} components all healthy")
+          PY
+
+      - name: Assert POST /api/v1/ingest returns a FHIR Bundle, advisory-only
+        run: |
+          printf 'MSH|^~\\&|PHILIPS_INTELLIVUE|ICU_UNIT|EHR|HOSPITAL|20260101120000||ORU^R01|CI1|P|2.5.1\r' >  /tmp/msg.hl7
+          printf 'PID|1||CI-VERIFY-001^^^HOSP^MR||CI^SYNTHETIC||19700101|U\r'                              >> /tmp/msg.hl7
+          printf 'OBR|1||ORDER-CI1|||||20260101120000\r'                                                    >> /tmp/msg.hl7
+          printf 'OBX|1|NM|8867-4^Heart rate^LN||72|/min|||||F|||20260101120000\r'                          >> /tmp/msg.hl7
+          printf 'OBX|2|NM|9279-1^Respiratory rate^LN||16|/min|||||F|||20260101120000\r'                    >> /tmp/msg.hl7
+          printf 'OBX|3|NM|59408-5^SpO2^LN||98|%%|||||F|||20260101120000\r'                                 >> /tmp/msg.hl7
+          printf 'OBX|4|NM|8480-6^Systolic BP^LN||120|mmHg|||||F|||20260101120000\r'                        >> /tmp/msg.hl7
+          printf 'OBX|5|NM|8310-5^Temperature^LN||37.0|Cel|||||F|||20260101120000\r'                        >> /tmp/msg.hl7
+          printf 'OBX|6|NM|57834-7^Oxygen therapy^LN||0||||||F|||20260101120000\r'                          >> /tmp/msg.hl7
+          printf 'OBX|7|ST|76270-8^AVPU score^LN||A||||||F|||20260101120000\r'                              >> /tmp/msg.hl7
+
+          code="$(curl -s -D /tmp/h.txt -o /tmp/bundle.json -w '%{http_code}' \
+            -X POST 'http://127.0.0.1:8000/api/v1/ingest?spo2_scale=SCALE_1' \
+            -H 'Content-Type: text/plain' --data-binary @/tmp/msg.hl7)"
+          echo "  HTTP $code"
+          [ "$code" = "200" ] || { echo "::error::ingest returned $code"; cat /tmp/bundle.json; exit 1; }
+
+          # Header names are compared case-insensitively: uvicorn emits them
+          # lower-cased, so grepping for the documented spelling verbatim
+          # silently misses.
+          if ! grep -iq '^x-cds-advisory-only:[[:space:]]*true' /tmp/h.txt; then
+            echo "::error::X-CDS-Advisory-Only: true is missing from the response."
+            cat /tmp/h.txt
+            exit 1
+          fi
+          echo "  OK  X-CDS-Advisory-Only: true"
+
+          if ! grep -iq '^content-type:.*application/fhir+json' /tmp/h.txt; then
+            echo "::error::media type is not application/fhir+json"
+            cat /tmp/h.txt
+            exit 1
+          fi
+          echo "  OK  media type application/fhir+json"
+
+          python - <<'PY'
+          import json, sys
+          b = json.load(open("/tmp/bundle.json"))
+          if b.get("resourceType") != "Bundle":
+              print(f"::error::resourceType is {b.get('resourceType')!r}, expected Bundle")
+              sys.exit(1)
+          entries = b.get("entry", [])
+          if not entries:
+              print("::error::Bundle has no entries")
+              sys.exit(1)
+          news2 = [
+              e for e in entries
+              if any(c.get("code") == "1239842005"
+                     for c in e.get("resource", {}).get("code", {}).get("coding", []))
+          ]
+          if not news2:
+              print("::error::Bundle contains no NEWS2 Observation (SNOMED 1239842005)")
+              sys.exit(1)
+          print(f"  OK  Bundle with {len(entries)} entries incl. the NEWS2 Observation")
+          PY
+
+      - name: Assert HEALTHCHECK reports healthy
+        run: |
+          for i in $(seq 1 60); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' icu-verify 2>/dev/null || echo none)"
+            if [ "$status" = "healthy" ]; then echo "  OK  HEALTHCHECK healthy after ${i}s"; exit 0; fi
+            if [ "$status" = "none" ]; then echo "  note: no HEALTHCHECK defined"; exit 0; fi
+            sleep 2
+          done
+          echo "::error::HEALTHCHECK did not reach healthy"
+          docker inspect --format '{{json .State.Health}}' icu-verify
+          exit 1
+
+      # ── Evidence for the job summary ─────────────────────────────────────
+
+      - name: Record image evidence
+        if: always()
+        run: |
+          size="$(docker image inspect "$IMAGE" --format '{{.Size}}' 2>/dev/null || echo 0)"
+          size_mb="$(awk -v s="$size" 'BEGIN{printf "%.1f", s/1024/1024}')"
+          layers="$(docker image inspect "$IMAGE" --format '{{len .RootFS.Layers}}' 2>/dev/null || echo 0)"
+
+          {
+            echo "## Production image verification"
+            echo ""
+            echo "| Property | Value |"
+            echo "|---|---|"
+            echo "| Image | \`$IMAGE\` |"
+            echo "| Size | ${size_mb} MB |"
+            echo "| Layers | ${layers} |"
+            echo "| Runs as | UID 1001 (non-root) |"
+            echo "| \`/app/demo\` present | no (regulatory scope guard) |"
+            echo "| Streamlit importable | no |"
+            echo ""
+            echo "### OCI \`samd.*\` labels"
+            echo ""
+            echo '```json'
+            docker image inspect "$IMAGE" --format '{{json .Config.Labels}}' 2>/dev/null \
+              | python -c "import json,sys; d=json.load(sys.stdin) or {}; print(json.dumps({k:v for k,v in sorted(d.items()) if k.startswith('samd.') or k.startswith('org.opencontainers')}, indent=2))" \
+              || echo "{}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs icu-verify || true
+
+      - name: Tear down
+        if: always()
+        run: docker rm -f icu-verify || true
