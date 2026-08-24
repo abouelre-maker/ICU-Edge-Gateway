@@ -135,7 +135,7 @@ RISK_STYLES: dict[str, RiskStyle] = {
     "LOW": RiskStyle(
         level="LOW",
         label="LOW",
-        background="#558b2f",
+        background="#456f26",
         foreground="#ffffff",
         escalation="Low — minimum 12-hourly observations",
         greyscale_weight=2,
@@ -156,7 +156,7 @@ RISK_STYLES: dict[str, RiskStyle] = {
     "MEDIUM": RiskStyle(
         level="MEDIUM",
         label="MEDIUM",
-        background="#ef6c00",
+        background="#bf360c",
         foreground="#ffffff",
         escalation=(
             "Urgent review by ward-based clinician and escalation to acute team"

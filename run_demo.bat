@@ -34,6 +34,7 @@ if not defined GATEWAY_PORT   set "GATEWAY_PORT=8000"
 if not defined DASHBOARD_PORT set "DASHBOARD_PORT=8501"
 if not defined MLLP_PORT      set "MLLP_PORT=2575"
 if not defined HEALTH_TIMEOUT set "HEALTH_TIMEOUT=60"
+if not defined DASHBOARD_TIMEOUT set "DASHBOARD_TIMEOUT=90"
 
 set "PY_APP=%REPO_ROOT%\venv311\Scripts\python.exe"
 set "PY_DEMO=%REPO_ROOT%\venv-demo\Scripts\python.exe"
@@ -44,7 +45,7 @@ echo   ======================================
 echo.
 
 REM ---------------------------------------------------------------- environments
-echo   Verifying environments (two, deliberately)...
+echo   Verifying environments ^(two, deliberately^)...
 
 if not exist "%PY_APP%" (
     echo.
@@ -111,7 +112,7 @@ REM environment for precisely that reason.
 if errorlevel 1 (
     echo.
     echo   ERROR: venv-demo has websockets ^>= 17, which streamlit forbids
-    echo          (it requires websockets^<17). Recreate venv-demo from
+    echo          ^(it requires websockets^<17^). Recreate venv-demo from
     echo          requirements-demo.txt.
     echo.
     goto :fail
@@ -127,11 +128,11 @@ call :checkport %MLLP_PORT%      mllp      || goto :fail
 echo     %GATEWAY_PORT%, %DASHBOARD_PORT%, %MLLP_PORT% all free
 
 REM ------------------------------------------------------------------- 1. gateway
-echo   Starting gateway (uvicorn, MLLP enabled)...
+echo   Starting gateway ^(uvicorn, MLLP enabled^)...
 start "ICU Gateway" cmd /k "cd /d "%REPO_ROOT%" && set MLLP_ENABLED=1&& set MLLP_PORT=%MLLP_PORT%&& set PYTHONPATH=src&& "%PY_APP%" -m uvicorn main:app --host 127.0.0.1 --port %GATEWAY_PORT%"
 
 REM --------------------------------------------------- 2. health gate (blocking)
-echo   Waiting for GET /health to report healthy (timeout %HEALTH_TIMEOUT%s)...
+echo   Waiting for GET /health to report healthy ^(timeout %HEALTH_TIMEOUT%s^)...
 set "HEALTHY=0"
 for /l %%i in (1,1,%HEALTH_TIMEOUT%) do (
     if "!HEALTHY!"=="0" (
@@ -152,12 +153,33 @@ if "!HEALTHY!"=="0" (
 echo     gateway healthy
 
 REM ------------------------- 3. dashboard BEFORE streamer (shows AWAITING state)
-echo   Starting dashboard (Streamlit, demo environment)...
-start "Clinical Dashboard" cmd /k "cd /d "%REPO_ROOT%\demo" && "%PY_DEMO%" -m streamlit run dashboard.py --server.port %DASHBOARD_PORT% --server.headless true --browser.gatherUsageStats false"
-ping -n 4 127.0.0.1 >nul
+echo   Starting dashboard ^(Streamlit, demo environment^)...
+start "Clinical Dashboard" cmd /k "cd /d "%REPO_ROOT%\demo" && "%PY_DEMO%" -m streamlit run dashboard.py --server.port %DASHBOARD_PORT% --server.address 127.0.0.1 --server.headless true --browser.gatherUsageStats false"
+
+REM ------------------- 3b. dashboard readiness gate (blocking, replaces fixed delay)
+echo   Waiting for dashboard to accept connections ^(timeout %DASHBOARD_TIMEOUT%s^)...
+set "DASH_UP=0"
+for /l %%i in (1,1,%DASHBOARD_TIMEOUT%) do (
+    if "!DASH_UP!"=="0" (
+        "%PY_DEMO%" -c "import socket; s=socket.create_connection(('127.0.0.1',%DASHBOARD_PORT%),1); s.close()" >nul 2>&1
+        if not errorlevel 1 set "DASH_UP=1"
+        if "!DASH_UP!"=="0" ping -n 2 127.0.0.1 >nul
+    )
+)
+if "!DASH_UP!"=="0" (
+    echo.
+    echo   ERROR: dashboard never listened on port %DASHBOARD_PORT% within %DASHBOARD_TIMEOUT%s.
+    echo          Check the "Clinical Dashboard" window. Common causes:
+    echo            - Windows Defender Firewall blocked the bind on first run
+    echo            - streamlit missing from venv-demo
+    echo            - port %DASHBOARD_PORT% taken after the pre-flight check
+    echo.
+    goto :fail
+)
+echo     dashboard listening
 
 REM ------------------------------------------------------------------ 4. streamer
-echo   Starting 3-bed synthetic streamer (MLLP)...
+echo   Starting 3-bed synthetic streamer ^(MLLP^)...
 start "Patient Streamer" cmd /k "cd /d "%REPO_ROOT%" && "%PY_APP%" scripts\demo_inject.py --continuous --beds 3 --interval 2.0 --seed 42 --transport mllp --gateway-host 127.0.0.1 --mllp-port %MLLP_PORT% --http-port %GATEWAY_PORT%"
 
 REM --------------------------------------------------------- 5. browser + summary
@@ -177,14 +199,14 @@ echo     ReDoc        http://127.0.0.1:%GATEWAY_PORT%/redoc
 echo     OpenAPI      http://127.0.0.1:%GATEWAY_PORT%/openapi.json
 echo     Health       http://127.0.0.1:%GATEWAY_PORT%/health
 echo     WebSocket    ws://127.0.0.1:%GATEWAY_PORT%/api/v1/live/vitals
-echo     MLLP (TCP)   127.0.0.1:%MLLP_PORT%
+echo     MLLP ^(TCP^)   127.0.0.1:%MLLP_PORT%
 echo   +------------------------------------------------------------------------+
 echo     TWO ENVIRONMENTS ARE IN USE - this is intentional:
-echo       gateway + streamer : venv311    (websockets==17.0.1, production pin)
-echo       dashboard          : venv-demo  (streamlit needs websockets^<17)
+echo       gateway + streamer : venv311    ^(websockets==17.0.1, production pin^)
+echo       dashboard          : venv-demo  ^(streamlit needs websockets^<17^)
 echo     They are mutually incompatible. Do not merge them.
 echo   +------------------------------------------------------------------------+
-echo     One-shot scenarios (run in another shell; streamer keeps running):
+echo     One-shot scenarios ^(run in another shell; streamer keeps running^):
 echo       venv311\Scripts\python scripts\demo_inject.py --scenario low-medium --transport http
 echo       venv311\Scripts\python scripts\demo_inject.py --scenario artifact    --transport http
 echo   +------------------------------------------------------------------------+
@@ -207,16 +229,25 @@ exit /b 0
 
 REM ------------------------------------------------------------------ subroutines
 :checkport
-netstat -ano | findstr /r /c:"LISTENING" | findstr /c:":%~1 " >nul 2>&1
-if not errorlevel 1 (
-    echo.
-    echo   ERROR: port %~1 (%~2) is already in use.
-    echo          Free it, or set a different port before running:
-    echo            set %~2_PORT=^<port^>
-    echo.
-    exit /b 1
+REM  Reports the PID holding a port. With RECLAIM_PORTS=1, reclaims it first.
+set "PORTPID="
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:"LISTENING" ^| findstr /c:":%~1 "') do set "PORTPID=%%p"
+if not defined PORTPID exit /b 0
+if "%RECLAIM_PORTS%"=="1" (
+    echo     port %~1 ^(%~2^) held by PID !PORTPID! - reclaiming ^(RECLAIM_PORTS=1^)
+    taskkill /f /pid !PORTPID! >nul 2>&1
+    ping -n 3 127.0.0.1 >nul
+    set "PORTPID="
+    for /f "tokens=5" %%p in ('netstat -ano ^| findstr /r /c:"LISTENING" ^| findstr /c:":%~1 "') do set "PORTPID=%%p"
+    if not defined PORTPID exit /b 0
 )
-exit /b 0
+echo.
+echo   ERROR: port %~1 ^(%~2^) is already in use by PID !PORTPID!.
+echo          Free that one process:   taskkill /f /pid !PORTPID!
+echo          Or free all demo ports:  stop_demo.bat
+echo          Or reclaim automatically: set RECLAIM_PORTS=1 ^&^& run_demo.bat
+echo.
+exit /b 1
 
 :fail
 echo   Demonstration stack did NOT start.
