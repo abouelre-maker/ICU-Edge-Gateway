@@ -398,7 +398,7 @@ def _render_components(state: BedState) -> None:
             # parameter at 3 triggers the single-parameter escalation rule on
             # its own -- so it is coloured as severely as a HIGH total.
             colour = (
-                "#b71c1c" if score >= 3
+                "#e53935" if score >= 3
                 else "#ef6c00" if score == 2
                 else "#558b2f" if score == 1
                 else "#30363d"
