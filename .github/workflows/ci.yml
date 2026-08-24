@@ -17,7 +17,8 @@ env:
   PYTHON_VERSION: "3.11"
   MIN_COVERAGE:   "90"
   MAX_IMAGE_MB:   "150"
-
+  PYTHONPATH: "."
+  
 jobs:
   # ─── Job 1: Static Analysis & Test Suite ─────────────────────────────────────
   quality-gate:
