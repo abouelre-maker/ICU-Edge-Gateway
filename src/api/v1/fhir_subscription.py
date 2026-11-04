@@ -13,7 +13,7 @@ All matching/storage logic is in SubscriptionRegistry; all delivery logic
 is in SubscriptionDispatcher. ISO 14971 hazards for this feature
 (HAZARD-STREAM-006/007/008) are documented in those modules, not repeated
 here.
-FDA CDS Non-Device Exemption: every delivered Bundle carries the same
+Non-device CDS design intent (not assessed by FDA): every delivered Bundle carries the same
 X-CDS-Advisory-Only marker as the REST ingestion responses (added in
 subscription_dispatcher.py's delivery headers) — Subscription delivery is
 a transport, not a new clinical output.

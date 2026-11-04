@@ -12,7 +12,7 @@ IEC 62304 §5.3: Builder pattern — FHIR schema knowledge is contained here onl
 ISO 14971 HAZARD-FHIR-002: Incorrect NEWS2 FHIR encoding causes downstream
 CDSS to misread the total score. Mitigation: total in valueInteger (integer,
 not float) with component observations for full transparency.
-FDA CDS Non-Device: FHIR output must include note that this is advisory only.
+Non-device CDS design intent (not assessed by FDA): FHIR output must include note that this is advisory only.
 """
 
 from __future__ import annotations
@@ -202,7 +202,7 @@ class NEWS2ObservationBuilder:
                     "valueString": _SW_VERSION,
                 },
                 {
-                    # FDA CDS Non-Device Exemption audit trail.
+                    # Non-device CDS design-intent audit trail.
                     # All NEWS2 outputs are advisory — clinician review required.
                     "url": _FDA_CDS_EXT,
                     "valueBoolean": True,

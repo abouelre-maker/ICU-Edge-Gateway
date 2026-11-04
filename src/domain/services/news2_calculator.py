@@ -12,13 +12,13 @@ ISO 14971 HAZARD-NEWS2-001: Incorrect NEWS2 scoring causes missed clinical
 deterioration or false escalation. All boundary conditions are verified by
 parametrized regulatory tests.
 
-FDA CDS Non-Device Exemption (21 CFR §880.3780):
+Designed to meet FDA non-device CDS criteria (FD&C Act §520(o)(1)(E)); not assessed by FDA:
   - Output is advisory only — requires clinician review before clinical action.
   - Software does NOT trigger automated treatment.
   - Display to clinician for independent decision is mandatory per exemption criteria.
 
-Health Canada SaMD Class II:
-  - Risk Management File (ISO 14971) required.
+Health Canada: not assessed. Design intent:
+  - Risk Management File (ISO 14971) maintained.
   - All scoring logic is deterministic and auditable.
 """
 

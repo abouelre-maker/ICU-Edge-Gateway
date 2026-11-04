@@ -27,7 +27,7 @@ waveform DSP pipeline is used clinically against that monitor model.
 ISO 14971 HAZARD-WAVE-001: A waveform array with any single unparseable sample
 is rejected in its entirety (never silently truncated/reindexed) — a partial
 array would corrupt sample timing ahead of notch/bandpass/Hampel processing.
-SOUP: hl7apy==1.3.4 — version pinned in requirements.txt per IEC 62304 §8.1.2.
+SOUP: hl7apy==1.3.5 — version pinned in requirements.txt per IEC 62304 §8.1.2.
 """
 
 from __future__ import annotations

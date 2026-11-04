@@ -11,7 +11,7 @@ interoperability with embedded NEWS2 scoring.**
 > a customer, because there are no customers and no competitive benchmarks.
 >
 > **Note on sourcing:** every claim below is drawn from
-> [`the internal verified-claims sheet`](../../the internal verified-claims sheet),
+> the author's internal verified-claims sheet (not published),
 > the approved-claims source of truth, and cites its own evidence inline.
 > Anything that could not be evidenced was left out rather than softened.
 

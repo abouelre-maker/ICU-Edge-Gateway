@@ -70,3 +70,9 @@ merge_code.py
 # project artifact -- the project notes (the checked-in project directive) is
 # tracked, this directory is not.
 .claude/
+
+# ── Private working files (kept locally, not published) ──
+claude/
+the project notes
+PUSH_READINESS.md
+.agents/

@@ -5,7 +5,7 @@
 > from the source and hoped to be accurate. Where something was not observed,
 > it says so.
 >
-> **Approved claims come from [`the internal verified-claims sheet`](../../the internal verified-claims sheet).**
+> **Approved claims come from the author's internal verified-claims sheet (not published).**
 > That sheet is the source of truth for every factual and regulatory statement
 > here. Each statement below also cites the repository artefact or observed run
 > that supports it. Treat unattributed marketing language as absent by design.

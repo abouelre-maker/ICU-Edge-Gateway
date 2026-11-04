@@ -1,7 +1,13 @@
 # ICU Edge-to-FHIR Interoperability Gateway
 
-**SaMD middleware** that converts legacy ICU bedside monitor data (HL7 v2.x) into FHIR R4
+[![CI](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/workflows/ci.yml)
+
+A research prototype of **SaMD-style middleware** that converts legacy ICU bedside monitor data (HL7 v2.x) into FHIR R4
 Bundles with embedded NEWS2 (National Early Warning Score 2) clinical scoring.
+
+> **Research and portfolio prototype (M.Sc. thesis work). Not a medical device, not FDA-cleared or Health Canada-licensed, not clinically validated, and not for clinical use. All data in this repository is synthetic.**
+
+![Live bed-wall dashboard (synthetic data)](docs/demo/screenshots/02-bed-wall-live.jpg)
 
 > **Regulatory status: IN PROGRESS, not finalized.** This project has an active Phase 7
 > regulatory/QMS workstream (see [§ Regulatory & QMS Package](#regulatory--qms-package)
@@ -34,8 +40,8 @@ Bundles with embedded NEWS2 (National Early Warning Score 2) clinical scoring.
 
 ## Architecture
 
-Clean Architecture / hexagonal layering, enforced by IEC 62304 §5.3 single-responsibility
-comments throughout the codebase:
+Clean Architecture / hexagonal layering. Layer boundaries are documented against
+IEC 62304 §5.3 (software architectural design) in comments throughout the codebase:
 
 ```
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -101,14 +107,14 @@ unset, the gateway falls back to a `http://localhost:3000` dev default; if set t
 gateway refuses to start ([src/config.py](src/config.py) — HAZARD-CORS-001 mitigation).
 
 For containerized deployment, see the multi-stage `Dockerfile` (Alpine 3.19, non-root,
-<150 MB target image) and [docs/DEPLOYMENT_RUNBOOK.md](docs/DEPLOYMENT_RUNBOOK.md) for the
+CI fails the build if the image exceeds 400 MB) and [docs/DEPLOYMENT_RUNBOOK.md](docs/DEPLOYMENT_RUNBOOK.md) for the
 full step-by-step procedure.
 
 ## Technical Demo
 
 `scripts/demo_run.sh` runs a single reproducible, real-pipeline demo on top of the
 **existing** `docker-compose.yml` stack (mock control plane + gateway + HL7 monitor
-simulator — see [Quickstart](#quickstart) above for what that stack is). It is not a
+simulator, defined in `docker-compose.yml`). It is not a
 mockup: every value it prints comes from the actually-running gateway container, over a
 real MLLP TCP socket and a real WebSocket connection — no simulated or hardcoded output.
 
@@ -171,7 +177,7 @@ left running afterward; `docker compose down` to stop it.
 ## Test Suite & Quality Gates
 
 ```
-332 passed, 1 xfailed (intentional, strict — see HAZARD-DSP-005), 91% line coverage
+816 passed, 1 xfailed (intentional, strict — see HAZARD-DSP-005), 95% line coverage (Python 3.11)
 ruff check src tests: clean
 ```
 
@@ -239,6 +245,8 @@ src/
   infrastructure/
     adapters/hl7v2_adapter.py  HL7 v2.x parsing (5 vendor dialects + generic)
     fhir/                       FHIR R4 resource builders
+    streaming/                  MLLP streaming listener and WebSocket fan-out
+    provisioning/               Device enrollment
   config.py                CORS origin resolution (fail-closed)
   main.py                  ASGI app factory
 tests/
@@ -246,12 +254,13 @@ tests/
   integration/              Full-pipeline and API-level tests
   regulatory/               NEWS2 safety boundary verification
 docs/                      Phase 5-7 technical and regulatory/QMS documentation
+demo/, infra/, deploy/     Demo stack, infrastructure and deployment files
 Dockerfile                 Multi-stage, Alpine, non-root, IEC 62304-annotated
 ```
 
 ## License
 
-Proprietary — IEC 62304 Class B SaMD (per `pyproject.toml` / Dockerfile OCI labels).
+Proprietary. All rights reserved. See [LICENSE](LICENSE). The code is public for review and evaluation only.
 
 ## Contact
 

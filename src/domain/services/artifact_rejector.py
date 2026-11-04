@@ -1,4 +1,4 @@
-"""Artifact Rejection DSP Strategies — IEC 62304 / ISO 14971 Compliant.
+"""Artifact Rejection DSP Strategies — Designed with IEC 62304 / ISO 14971 practices.
 
 Implements signal processing filters for ICU vital sign waveforms and numeric values:
   - DualNotchFilter: Removes 50 Hz and 60 Hz power line interference.

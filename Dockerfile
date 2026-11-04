@@ -1,7 +1,7 @@
 # =============================================================================
 # ICU Edge-to-FHIR Interoperability Gateway
-# Multi-stage Dockerfile — Edge-Optimized, IEC 62304 Compliant
-# Target: Alpine 3.19 · Non-root · Final image < 150 MB
+# Multi-stage Dockerfile — Edge-Optimized, developed following IEC 62304 Class B practices
+# Target: Alpine 3.19 · Non-root · CI limit 400 MB
 # =============================================================================
 
 # ─── Stage 1: Dependency Builder ─────────────────────────────────────────────
@@ -56,11 +56,11 @@ LABEL org.opencontainers.image.title="ICU Edge-to-FHIR Interoperability Gateway"
       org.opencontainers.image.version="1.0.0" \
       org.opencontainers.image.vendor="Housam Abouelreish" \
       org.opencontainers.image.description="SaMD: HL7 v2.x → NEWS2 → FHIR R4" \
-      org.opencontainers.image.licenses="Proprietary-IEC62304-ClassB" \
+      org.opencontainers.image.licenses="LicenseRef-Proprietary" \
       samd.iec62304.class="B" \
       samd.iso14971.risk="Medium" \
-      samd.regulatory.fda="CDS-Non-Device" \
-      samd.regulatory.canada="Class-II" \
+      samd.regulatory.fda="not-assessed" \
+      samd.regulatory.canada="not-assessed" \
       icu-edge-gateway.provisioning.component="device-enrollment" \
       icu-edge-gateway.provisioning.phase="5-section-b"
 
