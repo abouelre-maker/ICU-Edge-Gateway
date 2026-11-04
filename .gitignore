@@ -64,15 +64,3 @@ files.zip
 files/
 icu_full_code.txt
 merge_code.py
-
-# ── Agent / Assistant session state ────────────────────────────────────
-# Local editor session/permission state. Machine-specific, not a
-# project artifact -- the project notes (the checked-in project directive) is
-# tracked, this directory is not.
-.claude/
-
-# ── Private working files (kept locally, not published) ──
-claude/
-the project notes
-PUSH_READINESS.md
-.agents/
