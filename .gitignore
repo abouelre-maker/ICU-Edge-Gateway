@@ -58,13 +58,3 @@ ICU_Edge_Gateway_Risk_Register_2.backup-*.xlsx
 files.zip
 files/
 merge_code.py
-
-# ── Agent / Assistant session state ────────────────────────────────────
-# Local editor session/permission state. Machine-specific, not a
-# project artifact -- the project notes (the checked-in project directive) is
-# tracked, this directory is not.
-
-# ── Private working files (kept locally, not published) ──
-the project notes
-PUSH_READINESS.md
-.agents/
