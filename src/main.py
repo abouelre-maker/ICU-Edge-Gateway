@@ -198,7 +198,7 @@ def create_app() -> FastAPI:
             "**Standards:** HL7 FHIR R4 · LOINC · SNOMED CT · UCUM · RCP NEWS2 2017."
         ),
         version="1.0.0",
-        license_info={"name": "Proprietary — IEC 62304 Class B SaMD"},
+        license_info={"name": "Apache-2.0", "identifier": "Apache-2.0"},
         contact={
             "name": "Housam Abouelreish",
             "url": "https://linkedin.com/in/housam-abouelreish-805352226",

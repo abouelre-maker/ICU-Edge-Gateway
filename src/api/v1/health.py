@@ -76,7 +76,7 @@ async def health_check(request: Request) -> HealthResponse:
     components: dict[str, ComponentHealth] = {
         "hl7v2_adapter": ComponentHealth(
             status="healthy",
-            note="hl7apy 1.3.4 — ORU^R01 v2.3–v2.8 parser ready.",
+            note="hl7apy 1.3.5 — ORU^R01 v2.3–v2.8 parser ready.",
         ),
         "dsp_pipeline": ComponentHealth(
             status="healthy",

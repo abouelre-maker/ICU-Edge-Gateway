@@ -63,3 +63,8 @@ merge_code.py
 # Local editor session/permission state. Machine-specific, not a
 # project artifact -- the project notes (the checked-in project directive) is
 # tracked, this directory is not.
+
+# ── Private working files (kept locally, not published) ──
+the project notes
+PUSH_READINESS.md
+.agents/

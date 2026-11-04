@@ -12,7 +12,7 @@ ISO 14971 HAZARD-API-001: spo2_scale must be explicitly provided when the
 patient is known to have hypercapnic respiratory failure (COPD). Defaulting
 to SCALE_1 is conservative — it will not underscore a non-COPD patient.
 
-FDA CDS Non-Device Exemption: The FHIR Bundle returned is advisory only.
+Non-device CDS design intent (not assessed by FDA): The FHIR Bundle returned is advisory only.
 The X-CDS-Advisory-Only response header signals this to downstream consumers.
 """
 
