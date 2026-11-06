@@ -5,7 +5,7 @@
 A research prototype of **SaMD-style middleware** that converts legacy ICU bedside monitor data (HL7 v2.x) into FHIR R4
 Bundles with embedded NEWS2 (National Early Warning Score 2) clinical scoring.
 
-> **Research and portfolio prototype (M.Sc. thesis work). Not a medical device, not FDA-cleared or Health Canada-licensed, not clinically validated, and not for clinical use. All data in this repository is synthetic.**
+> **Research and portfolio prototype, built as an independent engineering project. Not a medical device, not FDA-cleared or Health Canada-licensed, not clinically validated, and not for clinical use. All data in this repository is synthetic.**
 
 ![Live bed-wall dashboard (synthetic data)](docs/demo/screenshots/02-bed-wall-live.jpg)
 
