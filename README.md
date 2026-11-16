@@ -1,20 +1,48 @@
 # ICU Edge-to-FHIR Interoperability Gateway
 
 [![CI](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/abouelre-maker/ICU-Edge-Gateway/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)
+![FHIR R4](https://img.shields.io/badge/HL7%20FHIR-R4-orange.svg)
 
-A research prototype of **SaMD-style middleware** that converts legacy ICU bedside monitor data (HL7 v2.x) into FHIR R4
-Bundles with embedded NEWS2 (National Early Warning Score 2) clinical scoring.
+An open-source research implementation of an edge gateway that converts ICU bedside monitor
+data (HL7 v2.x) into HL7 FHIR R4 resources, rejects physiologically implausible values and
+waveform artifacts, and computes the National Early Warning Score 2 (NEWS2) deterministically.
+The software is developed under IEC 62304 software life-cycle practices and ISO 14971 risk
+analysis, and the full design and risk documentation is published with the code.
 
-> **Research prototype, built as an independent engineering project. Not a medical device, not FDA-cleared or Health Canada-licensed, not clinically validated, and not for clinical use. All data in this repository is synthetic.**
+> **Research software only.** This is not a medical device. It is not FDA-cleared, not
+> Health Canada-licensed, not clinically validated, and must not be used for clinical
+> decisions or patient care. All data in this repository is synthetic.
 
 ![Live bed-wall dashboard (synthetic data)](docs/demo/screenshots/02-bed-wall-live.jpg)
 
-> **Regulatory status: IN PROGRESS, not finalized.** This project has an active Phase 7
-> regulatory/QMS workstream (see [§ Regulatory & QMS Package](#regulatory--qms-package)
-> below). The product's FDA classification is **not yet determined** — do not treat any
-> comment or label in this codebase claiming "FDA CDS Non-Device Exemption" as a settled
-> fact; it is under active review. See
-> [docs/REG-001_Intended_Use_and_CDS_Exemption_Draft.md](docs/REG-001_Intended_Use_and_CDS_Exemption_Draft.md).
+## Why this project exists
+
+Many ICUs still run bedside monitors that speak only HL7 v2.x, often with vendor-specific
+codes, while modern clinical systems expect FHIR R4. Raw monitor feeds also contain
+artifacts (lead-off events, motion, transient sensor faults) that inflate early-warning
+scores and contribute to alarm fatigue. This repository is a reference implementation for
+studying three linked questions in one open, testable codebase:
+
+1. How can multi-vendor HL7 v2.x vital-sign streams be mapped to standard FHIR R4
+   Observations (LOINC, SNOMED CT, UCUM) without silent data loss?
+2. How much can simple, deterministic signal-quality controls (physiological bounds,
+   notch and bandpass filtering, Hampel outlier rejection) reduce false early-warning
+   scores caused by single bad samples?
+3. What does traceable, safety-oriented engineering evidence (requirements, hazards,
+   tests) look like for clinical decision support software at the edge?
+
+It is intended for researchers, students and engineers in biomedical engineering, health
+informatics and clinical decision support who want a working baseline to read, reproduce,
+critique and extend.
+
+> **Regulatory status: draft, not determined.** The documents in this repository record an
+> engineering analysis only. The software's FDA classification has not been determined; do
+> not treat any comment or label in the code that mentions "FDA CDS Non-Device Exemption" as
+> settled. See
+> [docs/REG-001_Intended_Use_and_CDS_Exemption_Draft.md](docs/REG-001_Intended_Use_and_CDS_Exemption_Draft.md)
+> and [regulatory/findings/REG-CITATION-001.md](regulatory/findings/REG-CITATION-001.md).
 
 ---
 
@@ -37,6 +65,23 @@ Bundles with embedded NEWS2 (National Early Warning Score 2) clinical scoring.
    individual vital-sign Observations, and cleaned waveform data — with an explicit,
    machine-readable `X-CDS-Advisory-Only: true` marker on every response. No automated
    clinical action is ever triggered by this software.
+
+## Methods summary
+
+| Stage | Method | Key parameters (source) |
+|---|---|---|
+| Plausibility | Physiological bounds check on every numeric value; NaN and ±Inf rejected | HR 20–250 bpm, RR 3–60 /min, SpO₂ 50–100 %, SBP 40–300 mmHg, DBP 20–200 mmHg, temperature 28–45 °C (`src/domain/services/artifact_rejector.py`) |
+| Mains interference | IIR notch filters at 50 Hz and 60 Hz, zero-phase (`filtfilt`) | Q = 2.0 |
+| Band limiting | Butterworth bandpass per signal type, zero-phase | order 3; e.g. ECG/HR 0.5–40 Hz, respiration 0.1–1.0 Hz, pleth 0.5–5 Hz |
+| Motion artifact | Hampel filter (sliding median, MAD-scaled threshold) | window radius 5, threshold 3 × 1.4826 × MAD |
+| Risk score | NEWS2 per RCP 2017, including SpO₂ Scale 1 vs Scale 2 (hypercapnic respiratory failure) and AVPU/new confusion | `src/domain/services/news2_calculator.py`; waveform data never feeds the score (enforced by `TestWaveformNeverFeedsNews2Score`) |
+| Output | FHIR R4 Bundle: NEWS2 Observation with per-parameter components, vital-sign Observations, cleaned waveform data, audit notes for rejected values | `src/infrastructure/fhir/` |
+
+Each NEWS2 boundary test in `tests/regulatory/` is traceable to a specific cell of the RCP
+2017 scoring table. Hazards are tracked in
+[docs/RMF-001_Risk_Management_File.md](docs/RMF-001_Risk_Management_File.md) and linked to
+requirements and tests in
+[docs/RTM-001_Requirements_Traceability_Matrix.md](docs/RTM-001_Requirements_Traceability_Matrix.md).
 
 ## Architecture
 
@@ -202,11 +247,20 @@ pytest --cov=src --cov-report=term-missing
 
 ## Regulatory & QMS Package
 
-Phase 7 (Regulatory/QMS Preparation) is in progress. Current artifacts, all explicitly
-marked as drafts pending human sign-off — **none of these constitute a completed regulatory
-submission or a certified QMS**:
+The repository includes a draft design-history and risk-management set written against
+IEC 62304, ISO 14971 and FDA design-control expectations. It is published so that the
+reasoning can be reviewed and reused in teaching and research. **None of these documents
+is a completed regulatory submission or a certified quality management system.**
 
-| Document | Purpose | Status |
+| Document | Purpose |
+|---|---|
+| [docs/SRS-001_Software_Requirements_Specification.md](docs/SRS-001_Software_Requirements_Specification.md) | Software requirements (every `REQ-*` ID found in `src/`) |
+| [docs/SAD-001_Software_Architecture_Description.md](docs/SAD-001_Software_Architecture_Description.md) | Software architecture description (IEC 62304 §5.3) |
+| [docs/RTM-001_Requirements_Traceability_Matrix.md](docs/RTM-001_Requirements_Traceability_Matrix.md) | Requirement → code → test → hazard traceability |
+| [docs/RMF-001_Risk_Management_File.md](docs/RMF-001_Risk_Management_File.md) | ISO 14971 risk management file (40 hazard entries) |
+| [docs/API-001_OpenAPI_Specification.yaml](docs/API-001_OpenAPI_Specification.yaml) | OpenAPI specification |
+
+| Further document | Purpose | Status |
 |---|---|---|
 | [docs/REG-001_Intended_Use_and_CDS_Exemption_Draft.md](docs/REG-001_Intended_Use_and_CDS_Exemption_Draft.md) | Draft Intended Use Statement + FDA CDS Non-Device exemption analysis | 🔶 Draft — classification decision pending regulatory/legal review |
 | [docs/QMS-001_DHF_Structure.md](docs/QMS-001_DHF_Structure.md) | Design History File & Risk Management File structure, modular by software function | 🔶 Draft structure — most underlying records not yet formalized |
@@ -253,15 +307,54 @@ tests/
   unit/                    Filter/algorithm-level tests
   integration/              Full-pipeline and API-level tests
   regulatory/               NEWS2 safety boundary verification
-docs/                      Phase 5-7 technical and regulatory/QMS documentation
+docs/                      Technical, regulatory and QMS documentation
 demo/, infra/, deploy/     Demo stack, infrastructure and deployment files
 Dockerfile                 Multi-stage, Alpine, non-root, IEC 62304-annotated
 ```
 
+## Limitations and future work
+
+- All verification uses synthetic data and simulated monitors. No clinical data, no clinical
+  validation study and no prospective evaluation has been performed.
+- Default waveform sampling rates per monitor model need validation against real devices
+  (HAZARD-PROTO-002).
+- The MLLP streaming path applies one process-wide SpO₂ scale; per-patient scale selection
+  is future work.
+- The demonstration stack has no authentication and no TLS on MLLP; it is for local use only.
+- The Docker image (≈372 MB) exceeds the project's own 150 MB edge budget
+  ([GAP-DOCKER-SIZE-001](regulatory/findings/GAP-DOCKER-SIZE-001.md)).
+- Two DSP residual risks (HAZARD-DSP-005, HAZARD-DSP-006) await review by a credentialed
+  clinical safety officer.
+
+Contributions, replication attempts and critical reviews of any of these points are welcome.
+
+## How to cite
+
+If you use this software in academic work, please cite it using the metadata in
+[CITATION.cff](CITATION.cff) (GitHub shows a "Cite this repository" button), for example:
+
+> Abouelreish, H. (2026). *ICU Edge-to-FHIR Interoperability Gateway* (Version 1.0.0)
+> [Computer software]. https://github.com/abouelre-maker/ICU-Edge-Gateway
+
+## References
+
+1. Royal College of Physicians. *National Early Warning Score (NEWS) 2: Standardising the
+   assessment of acute-illness severity in the NHS.* London: RCP; 2017.
+2. HL7 International. *FHIR Release 4 (v4.0.1).* https://hl7.org/fhir/R4/
+3. Hampel FR. The influence curve and its role in robust estimation. *Journal of the
+   American Statistical Association.* 1974;69(346):383–393.
+4. IEC 62304:2006+A1:2015. *Medical device software — Software life cycle processes.*
+5. ISO 14971:2019. *Medical devices — Application of risk management to medical devices.*
+6. U.S. Food and Drug Administration. *Clinical Decision Support Software: Guidance for
+   Industry and Food and Drug Administration Staff.* 2022.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Please report security issues privately as
+described in [SECURITY.md](SECURITY.md).
+
 ## License
 
-Proprietary. All rights reserved. See [LICENSE](LICENSE). The code is public for review and evaluation only.
-
-## Contact
-
-Housam Abouelreish — [linkedin.com/in/housam-abouelreish-805352226](https://linkedin.com/in/housam-abouelreish-805352226)
+Licensed under the [Apache License, Version 2.0](LICENSE). See [NOTICE](NOTICE) for the
+copyright notice and the medical-use disclaimer that applies to all copies and derivative
+works.

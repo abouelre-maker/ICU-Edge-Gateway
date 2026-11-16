@@ -8,7 +8,8 @@
       "url": "https://linkedin.com/in/housam-abouelreish-805352226"
     },
     "license": {
-      "name": "Proprietary — IEC 62304 Class B SaMD"
+      "name": "Apache-2.0",
+      "identifier": "Apache-2.0"
     },
     "version": "1.0.0"
   },

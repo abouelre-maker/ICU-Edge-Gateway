@@ -203,7 +203,7 @@ src/infrastructure/streaming/ src/infrastructure/provisioning/` returns zero mat
 
 | Hazard ID | Source location | In Risk Register (`ICU_Edge_Gateway_Risk_Register_2.xlsx`)? |
 |---|---|---|
-| HAZARD-STREAM-001 | `src/infrastructure/streaming/mllp_listener.py:23` | **Yes, as of 2026-08-10 (follow-up)** — row 40, `Open - Deferred by Scope Decision`, unscored. Was register-absent when this matrix was first compiled earlier the same day; see §6.1 below. |
+| HAZARD-STREAM-001 | `src/infrastructure/streaming/mllp_listener.py:23` | **Yes, as of 2026-08-10 (follow-up, 2026-08-10)** — row 40, `Open - Deferred by Scope Decision`, unscored. Was register-absent when this matrix was first compiled earlier the same day; see §6.1 below. |
 | HAZARD-STREAM-002 | `src/infrastructure/streaming/ring_buffer.py:12` (its defining anchor; also referenced from `live_dashboard_channel.py:39` and `mqtt_publisher.py:39`) | **Yes, as of 2026-08-10** — row 41, `Open - Deferred by Scope Decision`, unscored. |
 | HAZARD-STREAM-003 | `src/infrastructure/streaming/mqtt_publisher.py:23` | **Yes, as of 2026-08-10** — row 42, `Open - Deferred by Scope Decision`, unscored. |
 | HAZARD-STREAM-004 | `src/infrastructure/streaming/mqtt_publisher.py:47` | **Yes, as of 2026-08-10** — row 43, `Open - Deferred by Scope Decision`, unscored. |

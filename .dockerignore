@@ -60,3 +60,7 @@ scripts/
 venv-demo/
 run_demo.bat
 run_demo.sh
+
+# Required in the image (Apache-2.0 §4)
+!LICENSE
+!NOTICE

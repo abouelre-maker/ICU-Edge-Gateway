@@ -1,0 +1,32 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "ICU Edge-to-FHIR Interoperability Gateway"
+abstract: >-
+  An open-source research implementation of an edge gateway that converts ICU
+  bedside monitor data (HL7 v2.x) into HL7 FHIR R4 resources, applies
+  physiological bounds checking and waveform artifact rejection (notch,
+  Butterworth bandpass and Hampel filtering), and computes the National Early
+  Warning Score 2 (NEWS2) deterministically. Developed under IEC 62304 software
+  life-cycle practices with ISO 14971 risk analysis. Research software only;
+  not a medical device.
+type: software
+authors:
+  - family-names: "Abouelreish"
+    given-names: "Housam"
+    affiliation: "Mansoura University"
+repository-code: "https://github.com/abouelre-maker/ICU-Edge-Gateway"
+license: Apache-2.0
+version: "1.0.0"
+date-released: "2026-11-16"
+keywords:
+  - HL7 FHIR R4
+  - HL7 v2
+  - NEWS2
+  - early warning score
+  - intensive care unit
+  - biomedical signal processing
+  - artifact rejection
+  - healthcare interoperability
+  - software as a medical device
+  - IEC 62304
+  - ISO 14971

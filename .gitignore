@@ -48,8 +48,8 @@ dist/
 Thumbs.db
 
 # ── Local scratch / non-source artifacts (untracked, not part of the codebase) ──
-# These were found sitting at repo root outside version control; ignored rather
-# than deleted per session decision on 2026-08-09. Not reviewed for content.
+# Local working files kept outside version control.
+*.pptx
 ICU_Edge_Gateway_Risk_Register_2.xlsx
 # Timestamped snapshots of the same register (e.g. .backup-20260810c-pre-interim-signoff.xlsx)
 # carry the same "no git-based recovery net desired" intent as the line above — extended here
@@ -58,3 +58,4 @@ ICU_Edge_Gateway_Risk_Register_2.backup-*.xlsx
 files.zip
 files/
 merge_code.py
+*_full_code.txt

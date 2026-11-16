@@ -84,6 +84,10 @@ COPY --from=builder /install /usr/local
 WORKDIR /app
 COPY --chown=gateway:gateway src/ ./src/
 
+# Apache-2.0 §4: ship the license and the NOTICE (medical-use disclaimer)
+# with every distributed image.
+COPY --chown=gateway:gateway LICENSE NOTICE ./
+
 # Phase 5 Section B: entrypoint runs the enrollment handshake before
 # uvicorn starts (docker/entrypoint.sh -> bootstrap_cli.py). chmod is done
 # here, still as root, because USER switches below and gateway does not
