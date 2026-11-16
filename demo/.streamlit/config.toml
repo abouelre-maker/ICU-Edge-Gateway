@@ -1,0 +1,11 @@
+# The dashboard's custom CSS assumes a dark page. Without a dark base theme,
+# Streamlit renders headings, captions and expander headers in its light-theme
+# colours, which are almost unreadable on the dark background.
+[theme]
+base = "dark"
+backgroundColor = "#0e1117"
+secondaryBackgroundColor = "#161b22"
+textColor = "#e6edf3"
+
+[client]
+toolbarMode = "minimal"

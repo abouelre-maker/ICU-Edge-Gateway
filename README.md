@@ -85,6 +85,15 @@ Each NEWS2 boundary test in `tests/regulatory/` is traceable to a specific cell 
 requirements and tests in
 [docs/RTM-001_Requirements_Traceability_Matrix.md](docs/RTM-001_Requirements_Traceability_Matrix.md).
 
+### What the methods look like in practice
+
+All screenshots come from the live demonstration stack (`run_demo.sh`) using synthetic data.
+
+| Artifact rejection | SpO₂ Scale 1 vs Scale 2 | Single-parameter rule |
+|---|---|---|
+| ![A 450 bpm heart-rate value is rejected and no NEWS2 score is produced](docs/demo/screenshots/04-rejected-artifact-and-stale.jpg) | ![The same COPD patient scores LOW on Scale 2 and MEDIUM on Scale 1](docs/demo/screenshots/05-spo2-scale-comparison.jpg) | ![RR 8 alone gives a total of 3 but escalates to LOW-MEDIUM](docs/demo/screenshots/07-low-medium-single-parameter-rule.jpg) |
+| An out-of-range heart rate (450 bpm) is rejected and the score is withheld, instead of producing a false HIGH alert. | The same readings score 2 (LOW) on Scale 2 and 5 (MEDIUM) on Scale 1, showing why scale assignment must be a clinical decision. | A single parameter scoring 3 escalates the patient even though the total is only 3. |
+
 ## Architecture
 
 Clean Architecture / hexagonal layering. Layer boundaries are documented against
