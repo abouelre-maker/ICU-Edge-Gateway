@@ -1,0 +1,18 @@
+ICU Edge-to-FHIR Interoperability Gateway
+Copyright 2026 Housam Abouelreish
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+MEDICAL-USE DISCLAIMER
+
+This software is research software. It is not a medical device, has not been
+cleared, approved or licensed by any regulator (including the U.S. FDA and
+Health Canada), has not been clinically validated, and must not be used for
+clinical decisions, patient monitoring or patient care. Any regulatory
+statements in the source code or documentation are the author's own
+engineering analysis and have not been reviewed by any regulator or notified
+body. All data shipped with this repository is synthetic.
+
+Anyone who builds a product or service on this software is solely responsible
+for its intended-use definition, clinical validation, risk management and
+regulatory compliance in every jurisdiction where it is used.

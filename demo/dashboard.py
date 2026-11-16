@@ -644,8 +644,7 @@ def _render_sidebar(health: dict[str, Any] | None, now: float) -> None:
             )
 
         st.markdown("### Regulatory")
-        # Wording is fixed by the internal verified-claims sheet §3 (approved
-        # phrasing) and constrained by §2 (CANNOT SAY YET). Two earlier badges
+        # Wording is deliberately conservative. Two earlier badges
         # were removed rather than softened:
         #   "FDA CDS Non-Device Exemption" — FDA issues no exemption; the
         #       determination is the developer's own. Now stated as "designed

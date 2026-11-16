@@ -185,10 +185,8 @@ def create_app() -> FastAPI:
         description=(
             "**SaMD Middleware** — Transforms legacy ICU monitor data (HL7 v2.x) "
             "into FHIR R4 Bundles with embedded NEWS2 clinical scoring.\n\n"
-            # Wording fixed by the internal verified-claims sheet §3; §2 forbids
-            # asserting an FDA exemption or a Health Canada class. This string is
-            # SERVED to integrators via /openapi.json and Swagger UI, so it is
-            # buyer-facing copy, not an internal source comment.
+            # This string is served via /openapi.json and Swagger UI, so it must
+            # not assert an FDA exemption or a Health Canada class.
             "**Regulatory:** Engineered under IEC 62304 Class B software "
             "life-cycle practices with ISO 14971 risk analysis applied to each "
             "hazard; designed against the non-device clinical decision support "
@@ -200,7 +198,7 @@ def create_app() -> FastAPI:
             "**Standards:** HL7 FHIR R4 · LOINC · SNOMED CT · UCUM · RCP NEWS2 2017."
         ),
         version="1.0.0",
-        license_info={"name": "Proprietary. All rights reserved."},
+        license_info={"name": "Apache-2.0", "identifier": "Apache-2.0"},
         contact={
             "name": "Housam Abouelreish",
             "url": "https://linkedin.com/in/housam-abouelreish-805352226",

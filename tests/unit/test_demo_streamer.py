@@ -231,7 +231,7 @@ class TestSepsisRampTrajectory:
 
 class TestSpo2ScaleContrast:
     """
-    BED-02's commercial moment: the same reading scores differently on
+    BED-02's teaching point: the same reading scores differently on
     Scale 1 vs Scale 2. Verified through the real calculator.
     """
 

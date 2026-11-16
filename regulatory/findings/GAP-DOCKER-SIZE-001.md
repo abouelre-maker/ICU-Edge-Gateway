@@ -87,12 +87,12 @@ Either of the following, deliberately chosen — not whichever is easier:
 2. **Re-baseline the budget with a written rationale.** 150 MB was chosen as an
    edge-deployment constraint. Raising it is a product decision about whether the
    "edge-optimized" story still holds, not a config tweak. If the budget moves,
-   the commercial copy must move with it.
+   the project documentation must move with it.
 
 ## Claims impact — the reason this is tracked, not shrugged off
 
 Until this closes, **"edge-optimized" / "lightweight footprint" is not a sayable
-claim.** It sits in §2 CANNOT SAY YET of `the internal verified-claims sheet`.
+claim.** It should not be stated in any project description yet.
 
 The honest formulation available today is: *the image builds, runs non-root,
 passes every behavioural assertion in CI, and is 372 MB — against our own 150 MB

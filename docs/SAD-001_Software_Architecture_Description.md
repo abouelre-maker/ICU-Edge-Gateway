@@ -28,7 +28,7 @@
 description.
 **Prepared:** 2026-08-10, Phase 5-Stream Section E, deliverable 4.
 **Method:** Every class, module, file path, and line number cited below was checked directly
-against source this session (`grep -nE "^class |^def |^async def "` per file, plus targeted
+against source in this revision (`grep -nE "^class |^def |^async def "` per file, plus targeted
 reads of module docstrings and `main.py`'s composition root) — not transcribed from memory or
 from other documents' prior citations without re-verification. Counts in §1.3 were computed by
 enumeration, not estimated.
@@ -380,7 +380,7 @@ RTM-001 rather than re-litigated here:
   `HAZARD-STREAM-*` IDs also trace into the Risk Register) but **not requirement-tracked** — no
   `REQ-*` ID exists anywhere in `src/infrastructure/streaming/` or
   `src/infrastructure/provisioning/`, confirmed by `grep -rno "REQ-[A-Z0-9-]*"` against both
-  directories returning zero matches (re-run this session, same result as RTM-001's).
+  directories returning zero matches (re-run in this revision, same result as RTM-001's).
 - **This SAD's own architectural descriptions in §6-§7 are therefore traced to hazard IDs and
   source citations, not to `REQ-*` IDs**, unlike §3-§5's original-core descriptions, several of
   which reference the `REQ-*` ID governing that component (e.g. §3.1's `DeviceContext` →

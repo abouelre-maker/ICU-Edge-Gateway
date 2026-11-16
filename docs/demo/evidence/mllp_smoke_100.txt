@@ -5,7 +5,7 @@ UTC timestamp        : 2026-08-22T20:23:31Z
 Run tag              : SMOKE1787430202
 Gateway MLLP         : 127.0.0.1:2575
 Gateway WS           : ws://127.0.0.1:8000/api/v1/live/vitals
-Interpreter          : 3.11.9 (C:\Users\HUAWEI\Desktop\Projects\ICU-Edge-Gateway\venv311\Scripts\python.exe)
+Interpreter          : 3.11.9 (<local checkout>\venv311\Scripts\python.exe; local path redacted)
 
 Messages sent        : 100
 MLLP ACKs received   : 100 / 100

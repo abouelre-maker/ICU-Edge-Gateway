@@ -374,7 +374,7 @@ class TestHazardDsp007NanSpo2ExcludedNotScoredNormal:
 
 # ── HAZARD-NEWS2-003 / Bandit B101 nosec pin: filter parity + -O survival ────
 #
-# Closes a specific gap this session's own code review flagged (Bandit B101
+# Closes a specific gap that an internal code review flagged (Bandit B101
 # nosec review of the 6 `assert X is not None` lines in
 # NEWS2Calculator.calculate() / _extract_avpu()): those asserts were judged
 # safe to suppress because they merely re-confirm what

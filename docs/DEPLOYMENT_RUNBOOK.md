@@ -1,7 +1,7 @@
 # Deployment Runbook — ICU Edge-to-FHIR Interoperability Gateway
 
 **Status:** Current, verified against this repository as of commit `b166b17` and the
-Phase 7 documentation additions in this session.
+Phase 7 documentation additions.
 
 > **Scope note:** This runbook covers *software* installation, verification, and release
 > tagging — a configuration-management milestone under IEC 62304 §8. It is **not** a
@@ -30,7 +30,7 @@ cd ICU-Edge-Gateway
 python -m pip install -r requirements.txt -r requirements-dev.txt
 ```
 
-**Note on `requirements.txt`:** as of this session, `fastapi` and `uvicorn` were added to
+**Note on `requirements.txt`:** as of commit `b166b17`, `fastapi` and `uvicorn` were added to
 `requirements.txt` — they were previously missing despite being hard runtime dependencies
 of `src/main.py` and the Dockerfile's `CMD`. If you're running against an older checkout,
 confirm `requirements.txt` includes both before proceeding; installation will otherwise
@@ -120,7 +120,7 @@ into the runtime stage (`src/` only).
       ([pyproject.toml:7](../pyproject.toml)), while `src/main.py`'s FastAPI app declares
       `version="1.0.0"` ([src/main.py:60](../src/main.py)) and the Dockerfile's OCI label
       also says `1.0.0` ([Dockerfile:42](../Dockerfile)). **Decide which is authoritative
-      and update the other(s) before tagging** — I have not changed this myself since it's a
+      and update the other(s) before tagging** — this was left unchanged because it is a
       release-versioning decision, not a bug fix. If `1.0.0` is correct (matches the
       Dockerfile and app metadata, and this runbook's own examples), the fix is:
       ```diff

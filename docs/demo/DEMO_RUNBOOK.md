@@ -8,7 +8,7 @@ hypothetical ones — each is followed by what it looked like and what fixed it.
 
 ## 1. Pre-flight checklist
 
-Do this before the meeting, not in it.
+Do this before the demonstration, not during it.
 
 ### ☐ 1. TWO Python environments exist — this is item one for a reason
 
@@ -179,7 +179,7 @@ Find the offender: `netstat -ano | findstr :8000` then `tasklist /FI "PID eq <pi
 
 ---
 
-## 5. Resetting mid-meeting
+## 5. Resetting mid-demonstration
 
 **Bed 3 is at the wrong point in its story.** Do not restart anything. The loop
 is 90 seconds; say "it cycles — watch it climb again" and use the time for the
@@ -237,7 +237,7 @@ by running with the machine's network in use only for localhost.
   Fine on a laptop; not a deployment posture.
 - **No TLS on MLLP.** Plaintext TCP.
 - **Per-patient SpO2 scale is not implemented.** MLLP applies one process-wide
-  scale. See the roadmap in `COMMERCIAL_ONE_PAGER.md`.
+  scale. Per-patient scale selection is listed under future work in the README.
 - **REG-CITATION-001 is open.** The FDA CDS citation embedded in emitted
   output appears incorrect and is under review. Do not present it as settled.
 - **Clinical-validity evidence has no owner** under the January 2026 CDS

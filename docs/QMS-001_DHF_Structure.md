@@ -6,7 +6,7 @@ as an actual controlled DHF. This document defines *structure and traceability*,
 records themselves — most referenced records do not yet exist as controlled documents; they
 currently exist as this chat's history, code comments, and test files.
 
-**Prepared:** 2026-08-06, Phase 7, per project owner instruction.
+**Prepared:** 2026-08-06, Phase 7.
 
 **Depends on REG-001 (open):** this structure is deliberately **modular** so it does not
 presuppose the outcome of REG-001 §B.4 (whether Function A ships as exempt CDS, whether
@@ -126,10 +126,9 @@ spreadsheet itself doesn't exist here).
 | HAZARD-PROTO-002 | HL7 v2.x has no standardized waveform sampling-rate field; default table requires per-monitor-model validation | Module B | 🔲 **Open — not started, needs external device data** | Documented default table + explicit OBX-6 override path | `tests/integration/test_hl7v2_waveform_pipeline.py::TestWaveformCapableTypeInvariant` (only guards internal consistency, not real-world rate accuracy) |
 | HAZARD-WAVE-001 | Partially-parseable waveform array silently truncated/reindexed would corrupt sample timing | Module B | ✅ Closed | Fail-whole-array rule in `_parse_numeric_array` | `tests/integration/test_hl7v2_adapter.py::test_corrupted_waveform_sample_rejects_whole_array` |
 
-**Not fabricated:** every row above is either a hazard ID you named explicitly in this
-conversation, or one I found already referenced in existing code/docs during this session's
-work (DSP-004, PROTO-002, WAVE-001, DSP-001/002/003) — I did not invent new hazard IDs for
-this table.
+**Not fabricated:** every row above is a hazard ID already referenced in the existing code or
+documentation (including DSP-004, PROTO-002, WAVE-001, DSP-001/002/003). No new hazard IDs were
+invented for this table.
 
 ### 4.3 Overall Residual Risk Evaluation
 

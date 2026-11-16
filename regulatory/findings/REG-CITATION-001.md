@@ -57,8 +57,8 @@ earlier review and is already recorded, unresolved, in:
 - [`docs/REG-001_Intended_Use_and_CDS_Exemption_Draft.md` §B.1](../../docs/REG-001_Intended_Use_and_CDS_Exemption_Draft.md)
   — *"This citation could not be verified and should be checked against your
   regulatory counsel's records before further use."*
-- [`docs/PROJECT_HANDOFF_SUMMARY.md`](../../docs/PROJECT_HANDOFF_SUMMARY.md) lines
-  114–117 and 211, which flag it for correction.
+- the project status summary of 2026-08-06 (since retired from the repository), which
+  flagged it for correction.
 
 REG-CITATION-001 does not supersede REG-001; it supplies the **exhaustive location
 inventory and blast-radius analysis** that REG-001 did not have, so the correction can
@@ -72,11 +72,9 @@ Stated plainly rather than glossed:
   exists. No authoritative CFR source was consulted from this environment. It is
   possible the number is a transcription error for something the regulatory function
   is legitimately tracking. That reconciliation is counsel's, not engineering's.
-- **`the internal verified-claims sheet` does not exist in this repository.** It was
-  named as the source of truth for approved wording. The replacement wording in §3
+- **No approved claims register exists in this repository.** The replacement wording in §3
   below is therefore **engineering's proposal, not approved language**, and is
-  explicitly flagged as such. If an approved claims sheet exists elsewhere, its
-  wording supersedes §3 entirely.
+  explicitly flagged as such.
 - The regulatory-update context in §6 was **supplied to engineering by the project
   owner** and is recorded here as received. It has not been independently verified
   against a primary FDA source from this environment.
@@ -164,7 +162,7 @@ audience regardless of its regulatory scope.
 | `src/api/v1/fhir_subscription.py:16` | label only |
 | `src/infrastructure/fhir/news2_builder.py:15, 115, 205` | label only |
 | `README.md:9, 205` | already carries a caveat against treating it as settled |
-| `docs/SRS-001…md:24`, `docs/RMF-001…md:25–27`, `docs/REG-001…md` (multiple), `docs/PROJECT_HANDOFF_SUMMARY.md:106–117, 171, 211`, `docs/ICU_Edge_Gateway_Phase5_Technical_Package.md:91`, `docs/ICU_Edge_Gateway_OnePager_Content.md:103` | analysis / caveats |
+| `docs/SRS-001…md:24`, `docs/RMF-001…md:25–27`, `docs/REG-001…md` (multiple), `docs/ICU_Edge_Gateway_Phase5_Technical_Package.md:91` | analysis / caveats |
 
 Note: `src/domain/services/news2_calculator.py` and `src/domain/entities/*` are under
 the **frozen clinical-algorithm constraint**. Even a docstring-only correction there
@@ -257,8 +255,7 @@ Engineering is **not** proceeding without these answers:
    emitted citation cannot be recalled once persisted downstream.
 3. **Should "Exemption applies" become "intended to meet the criteria of"?**
    REG-001 §B.2 found the blanket product-wide assertion unsupportable.
-4. **Does an approved claims sheet exist?** If so, its wording supersedes §3 and
-   engineering will use it verbatim.
+4. **Is the §3 wording approved?** Until it is, it remains an engineering proposal.
 5. **Who owns item 6b** (clinical-validity evidence under the January 2026 guidance)?
 
 Until answered, the citation stays exactly as it is. A wrong citation left visible and

@@ -1,6 +1,6 @@
 # Clinical Safety Officer (CSO) — Role & Appointment Brief (TEMPLATE)
 
-**Status:** DRAFT TEMPLATE — ready for a buyer/adopting organization to complete and adopt.
+**Status:** DRAFT TEMPLATE — ready for an adopting organization to complete and adopt.
 Not a legal appointment instrument on its own; your organization's HR/QMS process should
 formalize it.
 

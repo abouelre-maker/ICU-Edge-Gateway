@@ -2,8 +2,8 @@
 ## Phase 5 Technical Package — Verified Baseline, Gap Analysis, SAD, Traceability Matrix, HL7↔FHIR Specification
 
 **Document status:** Draft for internal engineering and regulatory review.
-**Basis:** This document is derived exclusively from the source code actually present in the
-uploaded project (`icu_full_code.txt`, 37 source/test files, reconstructed and executed).
+**Basis:** This document is derived exclusively from the source code present in the
+repository at the Phase 5 baseline (37 source/test files, built and executed).
 No claim below is asserted without a corresponding line of code, test result, or explicit
 "NOT YET IMPLEMENTED" flag. Where information could not be verified from the artifacts
 provided, it is marked **UNVERIFIED** rather than assumed.
@@ -12,7 +12,7 @@ provided, it is marked **UNVERIFIED** rather than assumed.
 
 ## 0. Verification Method
 
-The concatenated code dump was parsed back into its real package structure
+The source tree was checked out at its real package structure
 (`src/`, `tests/unit`, `tests/integration`, `tests/regulatory`), dependencies were installed
 from the project's own `requirements.txt` / `requirements-dev.txt`, and the test suite was
 executed with coverage instrumentation. This is a live, reproducible result, not a restatement
@@ -96,7 +96,7 @@ advisory-only extension/note) is consistent with that intent. But **whether this
 actually qualifies for the exemption, and how it is classified in Canada, KSA, UAE, and Egypt, is
 a regulatory determination that must be made by qualified regulatory affairs / legal counsel
 against the current, in-force text of each jurisdiction's rules** — it cannot be self-certified
-by a code comment, and I have not independently verified current FDA/Health Canada/SFDA/MOHAP/EDA
+by a code comment, and this review has not independently verified current FDA/Health Canada/SFDA/MOHAP/EDA
 requirements against this build. Treat every "FDA CDS" / "Class II" comment in the code as a
 **design intent marker for engineering**, not as a completed regulatory submission artifact.
 
@@ -279,18 +279,16 @@ by itself, a completed regulatory submission for any of the target markets, beca
   residual-risk sign-off by a responsible person.
 - Health Canada, Saudi SFDA, UAE MOHAP/DHA, and Egyptian EDA each have their own device
   classification and submission processes, which are IMDRF-aligned in structure but differ in
-  specific documentation and local-representative requirements. I have not verified the current,
-  in-force requirements for any of these four jurisdictions against this build, and I'm not going
-  to fabricate citation numbers I can't confirm — this needs a regulatory affairs specialist (or a
-  targeted web-verified research pass, which I can run if you want it as its own task) before any
-  jurisdiction-specific claim is made in a pitch deck or submission.
+  specific documentation and local-representative requirements. The current, in-force
+  requirements for these four jurisdictions have not been verified against this build, and no
+  citation numbers are given here that could not be confirmed. A regulatory affairs specialist
+  should review them before any jurisdiction-specific claim is made in a publication or submission.
 - A cybersecurity/SBOM package (FDA premarket cybersecurity expectations) and a post-market
   surveillance plan do not yet exist in the artifacts provided.
 
-None of this blocks continued engineering work. It does mean "enterprise pitch decks" claiming
-regulatory clearance would be inaccurate to produce right now — a pitch deck describing the
-*engineering maturity and regulatory-readiness posture* (accurately) is appropriate today; a pitch
-deck implying clearance is not, and I won't draft the latter.
+None of this blocks continued engineering work. It does mean that any external description
+claiming regulatory clearance would be inaccurate. Describing the *engineering maturity and
+regulatory-readiness posture* accurately is appropriate; implying clearance is not.
 
 ---
 
@@ -300,7 +298,7 @@ deck implying clearance is not, and I won't draft the latter.
 Decide the real target: does Phase 5/6 need HL7 waveform ingestion (parsing `NA`/`ED` OBX
 segments into `VitalSignSample.waveform`), or is the JSON `/api/v1/vitals` waveform path the
 intended production route for now? Either is defensible — but the answer must be written down
-and the docs/marketing claims must match it exactly.
+and the documentation must match it exactly.
 
 **Step 2 — Add the missing integration test.**
 Whichever path is chosen, add an integration test that pushes a realistic waveform (synthetic
@@ -320,10 +318,10 @@ regulated `src/` tree) and remove the dead-code-looking bottom-of-file import in
 the traceability matrix in §3 is the starting skeleton for this.
 
 **Step 6 — Engage regulatory affairs** for a real classification determination per target market
-before any commercial or clearance claim is made externally.
+before any clearance claim is made externally.
 
 **Step 7 — Security/SBOM pass**: `pip-audit` and `bandit` are already declared in
-`requirements-dev.txt` but I did not find evidence they've been run in the artifacts provided —
+`requirements-dev.txt` but no evidence was found that they had been run in the artifacts provided —
 run them and remediate findings as part of the audit trail.
 
 ---

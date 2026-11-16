@@ -36,10 +36,10 @@ count and coverage numbers below are counted from this file's own table, not ass
 
 | Column | Populated from |
 |---|---|
-| Requirement | SRS-001 §3 — every `REQ-*` ID found in `src/` (17 total, confirmed by re-running the same `grep -rno "REQ-[A-Z0-9-]*" src/` this session that seeded SRS-001) |
+| Requirement | SRS-001 §3 — every `REQ-*` ID found in `src/` (17 total, confirmed by re-running the same `grep -rno "REQ-[A-Z0-9-]*" src/` in this revision that seeded SRS-001) |
 | Design Artifact | Re-derived directly from source in this compilation — the class/function at the cited file:line |
 | Hazard Link | RMF-001 §3/Appendix A — cross-checked that the cited `HAZARD-*` ID exists in RMF-001's register (40 entries as of 2026-08-10's correction pass — see §6.1) |
-| Test | Re-verified this session: the cited file exists, and the cited class/function name exists in it (see §4) |
+| Test | Re-verified in this revision: the cited file exists, and the cited class/function name exists in it (see §4) |
 
 Rows are grouped in the same subsystem order as SRS-001 §3 (request-flow order).
 
@@ -71,7 +71,7 @@ matrix show that layer as its own honest, explicit gap?
    SHALL, or an invented statement" scrutiny SRS-001 §1.1 already applies to existing tags — that
    review has not happened for this layer and doing it under this task's time-box would repeat
    SRS-001's own caveat about restating design-intent prose as formal requirements, but this time
-   for text that did not exist in source at all before this session.
+   for text that did not exist in source at all before this revision.
 
 **Consequence:** §3.7 below lists this layer's `HAZARD-STREAM-*`/provisioning coverage as
 **"hazard-tracked, requirement-tracking not yet applied"** — an explicit, separate section, not
@@ -136,7 +136,7 @@ QMS-001/SRS-001 going forward (see RMF-001 §9's identical open question about H
 | Requirement | Design Artifact | Hazard Link | Test |
 |---|---|---|---|
 | REQ-API-001 | `value_error_handler()` — `src/main.py:217-238` | Information-disclosure control; not independently registered as a `HAZARD-*` ID | `tests/integration/test_api_ingest.py::TestIngestErrorHandling` |
-| REQ-API-002 | `unhandled_exception_handler()` — `src/main.py:240-267` | Same information-disclosure control as REQ-API-001 | `tests/integration/test_main_exception_handler.py::TestReqApi002NoLeakOnUnhandledException` — **added this session** (see §6; previously no dedicated test existed for this exact guarantee, as SRS-001 §6 and RMF-001 both already flagged) |
+| REQ-API-002 | `unhandled_exception_handler()` — `src/main.py:240-267` | Same information-disclosure control as REQ-API-001 | `tests/integration/test_main_exception_handler.py::TestReqApi002NoLeakOnUnhandledException` — **added in this revision** (see §6; previously no dedicated test existed for this exact guarantee, as SRS-001 §6 and RMF-001 both already flagged) |
 | REQ-API-003 | `health_check()` — `src/api/v1/health.py:59-66` | Operational/availability requirement, not a clinical-scoring hazard control | `tests/integration/test_api_health.py::TestHealthEndpoint` (13 tests) |
 | REQ-API-010 | `VitalSignPayload(BaseModel)` — `src/api/v1/vitals.py:45-50` | HAZARD-DSP-007 (Open, INTERIM sign-off only) — SRS-001 explicit: this requirement's statement does **not** claim NaN/Infinity exclusion; actual mitigation is downstream in `PhysiologicalBoundsChecker`, not this Pydantic model | `tests/integration/test_api_vitals.py::TestVitalsValidationErrors` |
 
@@ -144,7 +144,7 @@ QMS-001/SRS-001 going forward (see RMF-001 §9's identical open question about H
 
 ## 4. Test Citation Verification Log
 
-Every class/function name cited in §3's Test column was checked to exist, this session, by
+Every class/function name cited in §3's Test column was checked to exist, in this revision, by
 `grep`ing the actual test file (not re-trusting SRS-001's prior citation):
 
 | Citation | File | Verified at line |
@@ -162,10 +162,10 @@ Every class/function name cited in §3's Test column was checked to exist, this 
 | `TestReqApi002NoLeakOnUnhandledException` (new) | `tests/integration/test_main_exception_handler.py` | 54 |
 
 All 17 `src/` `REQ-*` tag locations were independently re-confirmed by `grep -rno
-"REQ-[A-Z0-9-]*" src/` this session (17 unique IDs, matching SRS-001's count exactly — no drift
+"REQ-[A-Z0-9-]*" src/` in this revision (17 unique IDs, matching SRS-001's count exactly — no drift
 between SRS-001's compilation and this one).
 
-## 5. Item 2 — REQ-API-002 No-Leak Test (added this session, not documentation-only)
+## 5. Item 2 — REQ-API-002 No-Leak Test (added in this revision, not documentation-only)
 
 **Gap, as flagged independently by both SRS-001 §6 and RMF-001:** the previously-existing
 `tests/integration/test_api_ingest.py::test_error_response_has_detail_field` accepts either a
@@ -173,7 +173,7 @@ between SRS-001's compilation and this one).
 catch-all `unhandled_exception_handler` specifically, and does not assert non-leakage of
 exception type/message/traceback.
 
-**Closed this session:** `tests/integration/test_main_exception_handler.py` (new file, 3 tests)
+**Closed in this revision:** `tests/integration/test_main_exception_handler.py` (new file, 3 tests)
 — installs a throwaway route that raises a non-`ValueError` exception carrying a deliberately
 sensitive-looking message, drives it through the real ASGI app/middleware stack via
 `httpx.ASGITransport(..., raise_app_exceptions=False)`, and asserts:
@@ -183,7 +183,7 @@ sensitive-looking message, drives it through the real ASGI app/middleware stack 
    and contains none of: the exception type name (`RuntimeError`), the exception message, or
    Python traceback markers (`Traceback`, `File "`).
 2. Response headers likewise carry none of the above.
-3. **Mutation-tested this session, then reverted**: `src/main.py`'s handler was temporarily
+3. **Mutation-tested in this revision, then reverted**: `src/main.py`'s handler was temporarily
    edited to return `str(exc)` as the `detail` field; the new test failed as expected (caught
    the leak), confirming the test is not a tautology. The mutation was reverted immediately
    after (`git diff --stat src/main.py` confirmed a clean revert to the committed state).
@@ -199,11 +199,11 @@ sensitive-looking message, drives it through the real ASGI app/middleware stack 
 
 No `REQ-*` rows exist for this layer (confirmed: `grep -rno "REQ-[A-Z0-9-]*"
 src/infrastructure/streaming/ src/infrastructure/provisioning/` returns zero matches). What
-**does** exist, re-verified this session directly against source:
+**does** exist, re-verified in this revision directly against source:
 
 | Hazard ID | Source location | In Risk Register (`ICU_Edge_Gateway_Risk_Register_2.xlsx`)? |
 |---|---|---|
-| HAZARD-STREAM-001 | `src/infrastructure/streaming/mllp_listener.py:23` | **Yes, as of 2026-08-10 (this session, follow-up)** — row 40, `Open - Deferred by Scope Decision`, unscored. Was register-absent when this matrix was first compiled earlier the same day; see §6.1 below. |
+| HAZARD-STREAM-001 | `src/infrastructure/streaming/mllp_listener.py:23` | **Yes, as of 2026-08-10 (follow-up, 2026-08-10)** — row 40, `Open - Deferred by Scope Decision`, unscored. Was register-absent when this matrix was first compiled earlier the same day; see §6.1 below. |
 | HAZARD-STREAM-002 | `src/infrastructure/streaming/ring_buffer.py:12` (its defining anchor; also referenced from `live_dashboard_channel.py:39` and `mqtt_publisher.py:39`) | **Yes, as of 2026-08-10** — row 41, `Open - Deferred by Scope Decision`, unscored. |
 | HAZARD-STREAM-003 | `src/infrastructure/streaming/mqtt_publisher.py:23` | **Yes, as of 2026-08-10** — row 42, `Open - Deferred by Scope Decision`, unscored. |
 | HAZARD-STREAM-004 | `src/infrastructure/streaming/mqtt_publisher.py:47` | **Yes, as of 2026-08-10** — row 43, `Open - Deferred by Scope Decision`, unscored. |
@@ -214,13 +214,13 @@ src/infrastructure/streaming/ src/infrastructure/provisioning/` returns zero mat
 | HAZARD-STREAM-009 | `src/api/v1/fhir_subscription.py:21`; `src/config.py:152` | Yes — row 34, Open/mitigation applied, not self-closed |
 | HAZARD-STREAM-010 | `src/infrastructure/provisioning/bootstrap.py:52` | Yes — row 35, Open/PROPOSED, CA-pinning mitigation narrows scope |
 | HAZARD-STREAM-011 | `src/infrastructure/provisioning/cert_store.py:13` | Yes — row 36, Open/PROPOSED, scheduling gap closed |
-| HAZARD-STREAM-012 | `src/infrastructure/provisioning/enrollment_client.py` (cross-reference comment added 2026-08-10, this session — see §6.2) — full hazard record remains `infra/terraform/modules/ca/main.tf:13-43`, not `src/` | Yes — row 38, Open/INTERIM engineering sign-off recorded 2026-08-10 |
+| HAZARD-STREAM-012 | `src/infrastructure/provisioning/enrollment_client.py` (cross-reference comment added 2026-08-10 — see §6.2) — full hazard record remains `infra/terraform/modules/ca/main.tf:13-43`, not `src/` | Yes — row 38, Open/INTERIM engineering sign-off recorded 2026-08-10 |
 | HAZARD-DSP-007 | `src/infrastructure/streaming/mqtt_publisher.py:260` | Yes — row 39 (cross-cutting; also linked from REQ-NEWS2-003/REQ-API-010 above) |
 | HAZARD-ARCH-001 | `src/infrastructure/streaming/mllp_listener.py:17` | Yes — row 22, Closed, Mitigated (cross-cutting reference from streaming into an already-closed core hazard) |
 
 **Finding at original compilation, resolved same day (§6.1):** HAZARD-STREAM-001 through -005
 existed as `PROPOSED` hazard commentary directly in source but did **not** appear anywhere in
-the Risk Register when this matrix was first built. Rows were added this session (see §6.1) —
+the Risk Register when this matrix was first built. Rows were added in this revision (see §6.1) —
 this table reflects the post-fix state; the original gap is preserved in the row history for
 audit purposes, not silently edited away.
 
@@ -228,7 +228,7 @@ audit purposes, not silently edited away.
 trace to a source location; all 12 now also trace into the Risk Register). Requirement-tracking
 still not applied (0 `REQ-*` rows, by the §2 decision above — unchanged).
 
-### 6.1 Register Update (this session, follow-up to original compilation)
+### 6.1 Register Update (follow-up to original compilation, 2026-08-10)
 
 Per explicit follow-up instruction, HAZARD-STREAM-001 through -005 were added as Risk Register
 rows:
@@ -238,7 +238,7 @@ rows:
 - **Content transcribed from the source docstrings** (`mllp_listener.py`, `ring_buffer.py`,
   `mqtt_publisher.py` ×2, `live_dashboard_channel.py`) at the register's existing column
   granularity — not invented. Verification Evidence cells cite test files/classes confirmed
-  this session to exist and to exercise the named mitigation (e.g.
+  in this revision to exist and to exercise the named mitigation (e.g.
   `tests/integration/test_mllp_listener.py::TestOversizedFrameRejected`,
   `tests/unit/test_ring_buffer.py::TestOverflowDropOldest`) — except HAZARD-STREAM-004, where no
   dedicated test for the TLS-disabled-warning path was found (`grep -in "tls"
@@ -276,13 +276,13 @@ rows, and the workbook's `Risk ID` column — all three sets match exactly, 40 e
 matrix's own count in §1/§6 above already matched the corrected 40; no change was needed here
 beyond this note and the Hazard Link row's count reference (§1).
 
-### 6.2 HAZARD-STREAM-012 Bidirectional Traceability (this session, follow-up)
+### 6.2 HAZARD-STREAM-012 Bidirectional Traceability (follow-up, 2026-08-10)
 
 Previously (original compilation): HAZARD-STREAM-012 had a full hazard record in
 `infra/terraform/modules/ca/main.tf:13-43` and a Risk Register row, but **zero** presence in
 `src/` — a register/design-doc-to-source dead end for a Python-code reader.
 
-**Added this session:** a cross-reference comment in
+**Added in this revision:** a cross-reference comment in
 `src/infrastructure/provisioning/enrollment_client.py`, at the exact line where the device
 places its cryptographic root of trust (`verify=ca_bundle_path if ca_bundle_path else True` in
 `DeviceEnrollmentClient.__init__`) — the one place in `src/` where this hazard's subject (trust
@@ -297,13 +297,13 @@ already existed; only its source-traceability was missing).
 ## 7. Self-Flagged Gaps (this document)
 
 - **Phase 5-Stream layer has zero `REQ-*` rows** — by explicit decision, §2 above, not an
-  oversight. Unchanged by this session's follow-up work (§6.1/§6.2), which closed the
+  oversight. Unchanged by this revision's follow-up work (§6.1/§6.2), which closed the
   hazard-*tracking* gaps for this layer, not the requirement-tracking one — that decision stands.
 - **~~HAZARD-STREAM-001 through -005 were source-only~~ — RESOLVED 2026-08-10 (§6.1):** added as
   Risk Register rows, entry only (not risk evaluation — Sev/Prob remain unscored). Left here,
   struck through, as a record that the gap existed and was closed, not deleted without a trace.
 - **~~RMF-001's "34 hazard entries" claim was inaccurate~~ — RESOLVED 2026-08-10 (follow-up
-  task, same day):** the register actually had 35 populated rows even before this session's 5
+  task, same day):** the register actually had 35 populated rows even before this revision's 5
   additions (the PVC/`storageClassName` finding carried no `HAZARD-*` ID and was excluded from
   RMF-001's per-ID count). Register total is now 40. RMF-001 has since been corrected throughout
   (front matter, §2.1, §3, §4, §5, §6, §9) and the previously-unenumerated row added as
