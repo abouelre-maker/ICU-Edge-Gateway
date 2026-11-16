@@ -34,6 +34,7 @@ These are the same checks the CI quality gate runs:
 ruff check src/ tests/
 mypy src/
 bandit --recursive src/ --severity-level low --quiet
+pip-audit --requirement requirements.txt --progress-spinner off
 PYTHONPATH=. pytest --cov=src --cov-fail-under=90
 ```
 

@@ -13,7 +13,9 @@ analysis, and the full design and risk documentation is published with the code.
 
 > **Research software only.** This is not a medical device. It is not FDA-cleared, not
 > Health Canada-licensed, not clinically validated, and must not be used for clinical
-> decisions or patient care. All data in this repository is synthetic.
+> decisions or patient care. All data in this repository is synthetic. This statement
+> describes the intended use and is a disclaimer; it does not add restrictions to the
+> Apache-2.0 license.
 
 ![Live bed-wall dashboard (synthetic data)](docs/demo/screenshots/02-bed-wall-live.jpg)
 
@@ -70,7 +72,7 @@ critique and extend.
 
 | Stage | Method | Key parameters (source) |
 |---|---|---|
-| Plausibility | Physiological bounds check on every numeric value; NaN and ±Inf rejected | HR 20–250 bpm, RR 3–60 /min, SpO₂ 50–100 %, SBP 40–300 mmHg, DBP 20–200 mmHg, temperature 28–45 °C (`src/domain/services/artifact_rejector.py`) |
+| Plausibility | Physiological bounds check on every numeric value; NaN and ±Inf rejected | HR 20–250 bpm, RR 3–60 /min, SpO₂ 50–100 %, SBP 40–300 mmHg, DBP 20–200 mmHg, temperature 28–45 °C, supplemental O₂ flag 0–1 (`src/domain/services/artifact_rejector.py`) |
 | Mains interference | IIR notch filters at 50 Hz and 60 Hz, zero-phase (`filtfilt`) | Q = 2.0 |
 | Band limiting | Butterworth bandpass per signal type, zero-phase | order 3; e.g. ECG/HR 0.5–40 Hz, respiration 0.1–1.0 Hz, pleth 0.5–5 Hz |
 | Motion artifact | Hampel filter (sliding median, MAD-scaled threshold) | window radius 5, threshold 3 × 1.4826 × MAD |

@@ -183,7 +183,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="ICU Edge-to-FHIR Interoperability Gateway",
         description=(
-            "**SaMD Middleware** — Transforms legacy ICU monitor data (HL7 v2.x) "
+            "**Research software, not a medical device** — Transforms legacy ICU monitor data (HL7 v2.x) "
             "into FHIR R4 Bundles with embedded NEWS2 clinical scoring.\n\n"
             # This string is served via /openapi.json and Swagger UI, so it must
             # not assert an FDA exemption or a Health Canada class.

@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: ICU Edge-to-FHIR Interoperability Gateway
-  description: '**SaMD Middleware** — Transforms legacy ICU monitor data (HL7 v2.x)
+  description: '**Research software, not a medical device** — Transforms legacy ICU monitor data (HL7 v2.x)
     into FHIR R4 Bundles with embedded NEWS2 clinical scoring.
 
 

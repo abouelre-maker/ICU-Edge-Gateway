@@ -55,7 +55,7 @@ FROM python:3.11-alpine3.19 AS runtime
 LABEL org.opencontainers.image.title="ICU Edge-to-FHIR Interoperability Gateway" \
       org.opencontainers.image.version="1.0.0" \
       org.opencontainers.image.vendor="Housam Abouelreish" \
-      org.opencontainers.image.description="SaMD: HL7 v2.x → NEWS2 → FHIR R4" \
+      org.opencontainers.image.description="Research software (not a medical device): HL7 v2.x → NEWS2 → FHIR R4" \
       org.opencontainers.image.licenses="Apache-2.0" \
       samd.iec62304.class="B" \
       samd.iso14971.risk="Medium" \
