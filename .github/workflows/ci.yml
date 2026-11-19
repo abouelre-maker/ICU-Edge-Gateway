@@ -193,6 +193,7 @@ jobs:
   reverse-proxy-config:
     name: TLS reverse-proxy config (nginx -t)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -222,31 +223,63 @@ jobs:
               def log_message(self, *a): pass
           http.server.HTTPServer(("127.0.0.1", 8000), H).serve_forever()
           PY
-          python3 stub.py &
+          # Detach the stub's output; an inherited stdout keeps the step open forever.
+          python3 stub.py > /dev/null 2>&1 &
+          STUB=$!
+          trap 'kill $STUB 2>/dev/null; docker rm -f proxy >/dev/null 2>&1' EXIT
           docker run -d --name proxy --network host \
             -v "$PWD/deploy/reverse-proxy/nginx.conf:/etc/nginx/nginx.conf:ro" \
             -v "$PWD/tls:/etc/nginx/tls:ro" \
             nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
           sleep 2
 
-          out=$(curl -sk "https://127.0.0.1/api/v1/live/vitals?access_token=TOKEN123")
+          out=$(curl -sk -m 10 "https://127.0.0.1/api/v1/live/vitals?access_token=TOKEN123")
           echo "query-token case: $out"
           echo "$out" | grep -q '"auth": "Bearer TOKEN123"' || { echo "::error::token not moved into the header"; exit 1; }
           echo "$out" | grep -q '"path": "/api/v1/live/vitals"' || { echo "::error::query string reached the upstream"; exit 1; }
 
-          out=$(curl -sk -H "Authorization: Bearer HDR456" "https://127.0.0.1/api/v1/live/vitals")
+          out=$(curl -sk -m 10 -H "Authorization: Bearer HDR456" "https://127.0.0.1/api/v1/live/vitals")
           echo "header case: $out"
           echo "$out" | grep -q '"auth": "Bearer HDR456"' || { echo "::error::client header not passed through"; exit 1; }
 
-          docker exec proxy cat /var/log/nginx/access.log | grep -q TOKEN123 \
-            && { echo "::error::token written to the access log"; exit 1; } || echo "access log clean"
+          # In the official image the log files are links to the container's
+          # stdout/stderr, so read them with `docker logs` (access + error log).
+          docker logs proxy 2>&1 | grep -q TOKEN123 \
+            && { echo "::error::token written to the nginx logs"; exit 1; } || echo "nginx logs clean"
 
           curl -s -m 3 http://127.0.0.1/ >/dev/null 2>&1 \
             && { echo "::error::port 80 is listening"; exit 1; } || echo "no port 80 listener"
 
-          if echo | timeout 5 openssl s_client -connect 127.0.0.1:2576 -quiet 2>&1 | grep -qiE "alert|certificate required|handshake failure|errno"; then
-            echo "MLLP without client certificate refused"
-          else
-            echo "::error::MLLP accepted a client without a certificate"; exit 1
+          # nginx's stream module completes the TLS handshake and then closes a
+          # connection without a valid client certificate before proxying any
+          # byte. So the verdict is what reaches the upstream: a recorder on
+          # 127.0.0.1:2575 stands in for the gateway's MLLP port.
+          python3 -c "
+          import socket
+          s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          s.bind(('127.0.0.1', 2575)); s.listen()
+          while True:
+              c, _ = s.accept(); c.settimeout(3)
+              try:
+                  data = c.recv(4096)
+              except OSError:
+                  data = b''
+              open('mllp_received.txt', 'ab').write(data); c.close()
+          " > /dev/null 2>&1 &
+          REC=$!
+          trap 'kill $STUB $REC 2>/dev/null; docker rm -f proxy >/dev/null 2>&1' EXIT
+          sleep 1
+          : > mllp_received.txt
+          printf 'NO_CERT_MSG' | timeout 5 openssl s_client -tls1_2 -quiet -connect 127.0.0.1:2576 >/dev/null 2>&1 || true
+          sleep 1
+          if grep -q NO_CERT_MSG mllp_received.txt; then
+            echo "::error::MLLP data without a client certificate reached the gateway"; exit 1
           fi
-          docker rm -f proxy >/dev/null
+          echo "MLLP without client certificate: nothing reached the gateway"
+          # Positive control: a certificate trusted by the monitor CA gets through.
+          printf 'WITH_CERT_MSG' | timeout 5 openssl s_client -tls1_2 -quiet -connect 127.0.0.1:2576 \
+            -cert tls/gateway.crt -key tls/gateway.key >/dev/null 2>&1 || true
+          sleep 1
+          grep -q WITH_CERT_MSG mllp_received.txt \
+            || { echo "::error::MLLP data with a valid certificate did not reach the gateway"; exit 1; }
+          echo "MLLP with a valid client certificate: data delivered"
