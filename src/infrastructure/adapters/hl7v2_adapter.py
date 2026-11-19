@@ -251,6 +251,8 @@ class HL7ParseResult:
     skipped_obx_count: int
     parse_warnings: tuple[str, ...]
     findings: tuple[Finding, ...] = ()
+    message_control_id: str = ""  # MSH-10, echoed in MSA-2 by the MLLP ACK (A8)
+    message_type: str = ""  # MSH-9 components 1-2, e.g. "ORU^R01" (A7)
 
 
 # ── Adapter Implementation ─────────────────────────────────────────────────────
@@ -288,6 +290,20 @@ class HL7v2Adapter:
         # Normalise line endings — HL7 canonical separator is CR (\r)
         normalised = raw_hl7.replace("\r\n", "\r").replace("\n", "\r")
 
+        # A7: this adapter splits on the standard delimiters. A message that
+        # declares different MSH-1/MSH-2 characters is rejected explicitly
+        # rather than silently mis-split.
+        stripped = normalised.lstrip()
+        if stripped.startswith("MSH") and (
+            stripped[3:4] != "|"
+            or stripped[4:8] != "^~\\&"
+            or stripped[8:9] not in {"|", "#"}
+        ):
+            raise ValueError(
+                "Non-standard HL7 encoding characters (MSH-1/MSH-2) are not "
+                "supported; expected '|' and '^~\\&'."
+            )
+
         try:
             msg = _hl7apy_parse(
                 normalised,
@@ -305,7 +321,23 @@ class HL7v2Adapter:
 
         # ── Message-Level Metadata ─────────────────────────────────────────────
         msg_ts = self._extract_message_timestamp(msg)
-        patient_id = self._extract_patient_id(msg, warnings)
+        segments = [s for s in stripped.split("\r") if s]
+        msh = segments[0].split("|") if segments and segments[0].startswith("MSH") else []
+        msh9 = [c.strip() for c in (msh[8] if len(msh) > 8 else "").split("^")]
+        message_type = "^".join(msh9[:2]) if msh9[0] else ""
+        control_id = _decode_escapes(msh[9].strip()) if len(msh) > 9 else ""
+        if msh9[:2] != ["ORU", "R01"]:
+            warnings.append(
+                f"[MSH-9] Message type '{message_type or 'absent'}' is not ORU^R01."
+            )
+            findings.append(
+                Finding(
+                    ReasonCode.UNSUPPORTED_MESSAGE_TYPE,
+                    None,
+                    f"MSH-9 message type '{message_type or 'absent'}' is not ORU^R01.",
+                )
+            )
+        patient_id = _extract_patient_id_raw(segments, warnings, findings)
         vendor = (
             device_context.vendor
             if device_context is not None
@@ -361,6 +393,8 @@ class HL7v2Adapter:
             skipped_obx_count=skipped,
             parse_warnings=tuple(warnings),
             findings=tuple(findings),
+            message_control_id=control_id,
+            message_type=message_type,
         )
 
     # ── Private: Message-Level Extraction ─────────────────────────────────────
@@ -384,24 +418,6 @@ class HL7v2Adapter:
 
         return MonitorVendor.GENERIC
 
-    def _extract_patient_id(
-        self,
-        msg: object,
-        warnings: list[str],
-    ) -> str:
-        """Extract PID-3 (Patient Identifier List) component 1."""
-        for child in msg.children:  # type: ignore[attr-defined]
-            if getattr(child, "name", "").upper() == "PID":
-                pid_3 = _safe_field(child, "pid_3")
-                if pid_3:
-                    # PID-3 is CX type: component 1 is the ID value
-                    return pid_3.split("^")[0].strip() or "UNKNOWN"
-                break
-
-        warnings.append(
-            "[PID-MISSING] PID-3 Patient Identifier absent — using 'UNKNOWN'."
-        )
-        return "UNKNOWN"
 
     def _extract_message_timestamp(self, msg: object) -> datetime | None:
         """
@@ -1052,6 +1068,55 @@ def _non_exact_reason(raw: str) -> str | None:
     if re.fullmatch(r"-?\d+(\.\d+)?\s*[/:]\s*\d+(\.\d+)?", s):
         return f"Value '{raw}' is a compound value (e.g. systolic/diastolic)."
     return None
+
+
+_ESCAPES: Final[dict[str, str]] = {"F": "|", "S": "^", "T": "&", "R": "~", "E": "\\"}
+
+
+def _decode_escapes(value: str) -> str:
+    """A7: decode HL7 escape sequences \\F\\ \\S\\ \\T\\ \\R\\ \\E\\ (standard delimiters)."""
+    return re.sub(r"\\([FSTRE])\\", lambda m: _ESCAPES[m.group(1)], value)
+
+
+def _extract_patient_id_raw(
+    segments: list[str], warnings: list[str], findings: list[Finding]
+) -> str:
+    """
+    A7: read every PID-3 repetition (CX: ID^check^scheme^authority^type).
+    One non-empty repetition ⇒ its ID. Several ⇒ the single MR-typed one;
+    otherwise AMBIGUOUS_PATIENT_ID. None ⇒ "UNKNOWN" + AMBIGUOUS_PATIENT_ID
+    (which forces INCOMPLETE, so distinct patients are never scored together).
+    """
+    pid = next((s for s in segments if s.startswith("PID|")), None)
+    fields = pid.split("|") if pid else []
+    reps = [r for r in (fields[3] if len(fields) > 3 else "").split("~") if r.strip("^ ")]
+    parsed = [
+        (_decode_escapes(c[0].strip()), c[4].strip().upper() if len(c) > 4 else "")
+        for c in (r.split("^") for r in reps)
+    ]
+    parsed = [(i, t) for i, t in parsed if i]
+    if not parsed:
+        warnings.append("[PID-MISSING] PID-3 Patient Identifier absent — using 'UNKNOWN'.")
+        findings.append(
+            Finding(ReasonCode.AMBIGUOUS_PATIENT_ID, None, "PID-3 patient identifier absent.")
+        )
+        return "UNKNOWN"
+    if len(parsed) == 1:
+        return parsed[0][0]
+    mrs = [i for i, t in parsed if t == "MR"]
+    if len(mrs) == 1:
+        return mrs[0]
+    warnings.append(
+        f"[PID-AMBIGUOUS] {len(parsed)} PID-3 identifiers and no single MR-typed one."
+    )
+    findings.append(
+        Finding(
+            ReasonCode.AMBIGUOUS_PATIENT_ID,
+            None,
+            "Several PID-3 identifiers without a single MR-typed identifier.",
+        )
+    )
+    return parsed[0][0]
 
 
 def _apply_corrections(samples: list[VitalSignSample]) -> list[VitalSignSample]:
