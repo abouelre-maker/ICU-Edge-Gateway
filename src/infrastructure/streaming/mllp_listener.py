@@ -50,6 +50,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import ipaddress
 import re
 import uuid
 from collections.abc import Callable
@@ -150,6 +151,7 @@ class MLLPListener:
         frame_timeout_seconds: float = _DEFAULT_FRAME_TIMEOUT_SECONDS,
         idle_timeout_seconds: float = _DEFAULT_IDLE_TIMEOUT_SECONDS,
         max_connections: int = _DEFAULT_MAX_CONNECTIONS,
+        allowed_networks: tuple[str, ...] = ("127.0.0.0/8", "::1/128"),
     ) -> None:
         self._host = host
         self._port = port
@@ -177,6 +179,10 @@ class MLLPListener:
         self._max_connections = max_connections
         self._active_connections = 0
         self._handler_tasks: set[asyncio.Task[None]] = set()
+        # F-01: IP allow-list. Default loopback only; config.get_mllp_allowed_networks().
+        self._allowed_networks = tuple(
+            ipaddress.ip_network(n, strict=False) for n in allowed_networks
+        )
 
     @property
     def forward_buffer(self) -> StoreAndForwardRingBuffer[dict[str, Any]]:
@@ -227,6 +233,12 @@ class MLLPListener:
     ) -> None:
         peer = writer.get_extra_info("peername")
         log = _log.bind(peer=str(peer))
+        if not self._peer_allowed(peer):
+            log.warning("mllp_listener.connection.refused_not_allowed")
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+            return
         if self._active_connections >= self._max_connections:
             # F-03: refuse beyond the connection cap rather than queue unbounded.
             log.warning("mllp_listener.connection.refused_over_cap", cap=self._max_connections)
@@ -270,6 +282,15 @@ class MLLPListener:
             with contextlib.suppress(Exception):
                 await writer.wait_closed()
             log.info("mllp_listener.connection.close")
+
+    def _peer_allowed(self, peer: Any) -> bool:
+        try:
+            addr = ipaddress.ip_address(peer[0])
+        except (TypeError, ValueError, IndexError):
+            return False
+        if isinstance(addr, ipaddress.IPv6Address) and addr.ipv4_mapped is not None:
+            addr = addr.ipv4_mapped
+        return any(addr in net for net in self._allowed_networks)
 
     async def _read_frame(self, reader: asyncio.StreamReader, log: Any) -> bytes | None:
         """

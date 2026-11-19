@@ -27,6 +27,7 @@ from config import (
     get_hl7_max_obx,
     get_max_request_body_bytes,
     get_max_waveform_samples,
+    get_mllp_allowed_networks,
     get_mllp_enabled,
     get_mllp_host,
     get_mllp_port,
@@ -120,6 +121,7 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
             forward_buffer=app.state.forward_buffer,
             live_channel=app.state.live_dashboard_channel,
             subscription_dispatcher=app.state.subscription_dispatcher,
+            allowed_networks=get_mllp_allowed_networks(),
             adapter=HL7v2Adapter(
                 max_obx=get_hl7_max_obx(),
                 max_waveform_samples=get_max_waveform_samples(),

@@ -398,6 +398,49 @@ def get_max_waveform_samples() -> int:
     return _positive_int_env("MAX_WAVEFORM_SAMPLES", 20_000)
 
 
+_MIN_API_KEY_LENGTH = 32
+
+
+def get_gateway_api_keys() -> list[str]:
+    """GATEWAY_API_KEYS: comma-separated API keys (F-01). Empty list if unset."""
+    raw = os.getenv("GATEWAY_API_KEYS", "")
+    return [k.strip() for k in raw.split(",") if k.strip()]
+
+
+def validate_gateway_auth_config() -> None:
+    """
+    Fail-closed startup check (F-01): refuse to start without at least one
+    API key of >= 32 characters. Never falls back to open access.
+    """
+    keys = get_gateway_api_keys()
+    if not keys:
+        raise RuntimeError(
+            "GATEWAY_API_KEYS must be set: the ingest API refuses to start without "
+            "authentication (F-01)."
+        )
+    short = [i for i, k in enumerate(keys) if len(k) < _MIN_API_KEY_LENGTH]
+    if short:
+        raise RuntimeError(
+            f"GATEWAY_API_KEYS entries {short} are shorter than "
+            f"{_MIN_API_KEY_LENGTH} characters (F-01)."
+        )
+
+
+def get_mllp_allowed_networks() -> tuple[str, ...]:
+    """
+    MLLP_ALLOWED_CLIENTS: comma-separated CIDRs allowed to connect (F-01).
+    Unset => loopback only (fail closed): a deployment must name its monitor
+    / interface-engine networks explicitly.
+    """
+    import ipaddress  # noqa: PLC0415
+
+    raw = os.getenv("MLLP_ALLOWED_CLIENTS", "").strip()
+    nets = tuple(n.strip() for n in raw.split(",") if n.strip()) or ("127.0.0.0/8", "::1/128")
+    for n in nets:
+        ipaddress.ip_network(n, strict=False)  # raises ValueError on a bad entry
+    return nets
+
+
 def validate_news2_scoring_config() -> None:
     """
     Fail-closed startup check (A2, decision Q1(b)): the NEWS2 module may only

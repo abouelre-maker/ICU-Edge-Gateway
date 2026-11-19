@@ -44,7 +44,43 @@ Each item: what is needed, options, recommendation, and what it blocks. Status i
 
 ### HD-E6 — BLOCKED-TEST-CONFLICT items
 - **Blocks:** each affected finding.
-- **Status:** OPEN — 6 entries (A2-1, A5-1, A5-2, A8-1, F03-1, F04-1).
+- **Status:** OPEN — 9 entries (A2-1, A5-1, A5-2, A8-1, F03-1, F04-1, F01-1, F01-2, F08-1).
+
+#### F01-1 — HTTP authentication on /api/v1/ingest and /api/v1/vitals (Phase 2 gate item)
+- **Tests:** every existing test that calls these endpoints through the `client` fixture
+  without credentials — about 70 across `tests/integration/test_api_ingest.py` (28 call sites),
+  `tests/integration/test_api_vitals.py` (31), `tests/integration/test_live_websocket.py`,
+  `tests/integration/test_fhir_subscription_api.py`, `tests/unit/test_dashboard_logic.py`
+  (static count of call sites, 2026-09-30; a full-suite simulation hung on WebSocket tests
+  waiting for deltas and was stopped).
+- **Assertion locked in:** each expects 200/422 for an unauthenticated request.
+- **Behaviour it locks in:** the ingest API is open to anyone who can reach it.
+- **Why that is wrong:** F-01 (PoC-confirmed): unauthenticated clinical data injection.
+- **Now:** `src/api/auth.py` (`require_api_key`, SHA-256 + `hmac.compare_digest`, non-ASCII ⇒
+  401) and `config.validate_gateway_auth_config()` (fail closed: no key or key < 32 chars ⇒
+  refuse to start) are implemented and tested on a standalone app, but **not wired** into
+  `create_app()`. The service is therefore still unauthenticated.
+- **Options:** (1) authorise one append-only block in `tests/conftest.py` that sets a test-only
+  `GATEWAY_API_KEYS` and overrides the `client` fixture to send `Authorization: Bearer <test key>`
+  (no existing test or assertion edited), then wire the dependency — **recommended**;
+  (2) amend each test individually; (3) keep the API open, WONTFIX (not acceptable for any
+  deployment beyond a sealed lab).
+
+#### F01-2 — MLLP default bind 0.0.0.0
+- **Test:** `tests/unit/test_config.py` line 140: `assert get_mllp_host() == "0.0.0.0"`.
+- **Why it is a finding:** listening on all interfaces by default widens exposure (F-01).
+- **Now (mitigated, not closed):** an MLLP client **allow-list is wired** — unset
+  `MLLP_ALLOWED_CLIENTS` ⇒ loopback only — so a default deployment accepts no remote sender
+  even though it binds all interfaces.
+- **Options:** (1) amend the test to expect `127.0.0.1` and require `MLLP_HOST=0.0.0.0` as an
+  explicit opt-in — **recommended**; (2) keep 0.0.0.0 relying on the allow-list, WONTFIX.
+
+#### F08-1 — WebSocket token + Origin check
+- **Tests:** `tests/integration/test_live_websocket.py` (13 call sites) connect without a token.
+- **Now:** `api.auth.authorize_websocket` (token via header or `access_token` query; Origin must
+  be on the CORS allow-list when present; close 1008 otherwise) is implemented and tested, **not
+  wired** into `api/v1/live.py`.
+- **Options:** same as F01-1 (the recommended conftest block would also supply the WS token).
 
 #### F04-1 — patient identifier (PHI) in the MQTT topic
 - **Tests:** `tests/unit/test_mqtt_publisher.py::…::test_builds_topic_from_prefix_and_patient_id` and
