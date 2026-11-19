@@ -37,7 +37,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import ClassVar
 
-from domain.entities.patient_context import PatientContext
+from domain.entities.patient_context import PatientContext, SpO2Scale
 from domain.entities.score_outcome import (
     Finding,
     ReasonCode,
@@ -45,6 +45,7 @@ from domain.entities.score_outcome import (
     resolve_outcome,
 )
 from domain.entities.vital_sign import VitalSignType
+from domain.services.news2_calculator import NEWS2Calculator
 from domain.services.signal_processor import ProcessedVitalSign
 
 # The five numeric NEWS2 inputs (same set as news2_calculator._REQUIRED_VITAL_TYPES).
@@ -68,6 +69,50 @@ def is_physically_impossible(vital_type: VitalSignType, value: float) -> bool:
     if vital_type is VitalSignType.SPO2 and value > 100.0:
         return True
     return vital_type is VitalSignType.SUPPLEMENTAL_O2 and value not in (0.0, 1.0)
+
+
+# N-01: recording resolution of each banded input (RCP 2017 bands are integer,
+# temperature is 0.1 °C). A value between two grid points whose neighbours
+# score differently is "between bands"; the interim rule (HD-E8) takes the
+# more severe neighbour. Neighbours are scored by NEWS2Calculator's own band
+# functions, so the RCP boundaries are never restated or changed here (R6).
+_GRID_FACTOR: dict[VitalSignType, int] = {
+    VitalSignType.RESPIRATORY_RATE: 1,
+    VitalSignType.SPO2: 1,
+    VitalSignType.SYSTOLIC_BP: 1,
+    VitalSignType.HEART_RATE: 1,
+    VitalSignType.TEMPERATURE_CELSIUS: 10,
+}
+
+
+def _band_score(vt: VitalSignType, v: float, scale: SpO2Scale, on_o2: bool) -> int:
+    c = NEWS2Calculator
+    if vt is VitalSignType.RESPIRATORY_RATE:
+        return c._score_respiratory_rate(v)
+    if vt is VitalSignType.SPO2:
+        return c._score_spo2(v, scale, on_o2)
+    if vt is VitalSignType.SYSTOLIC_BP:
+        return c._score_systolic_bp(v)
+    if vt is VitalSignType.HEART_RATE:
+        return c._score_heart_rate(v)
+    return c._score_temperature(v)
+
+
+def _more_severe_neighbour(
+    vt: VitalSignType, v: float, scale: SpO2Scale, on_o2: bool
+) -> float | None:
+    """Return the more severe grid neighbour if v lies between two bands, else None."""
+    factor = _GRID_FACTOR[vt]
+    x = round(v * factor, 9)
+    lo, hi = math.floor(x), math.ceil(x)
+    if lo == hi:
+        return None
+    lo_v, hi_v = lo / factor, hi / factor
+    s_lo = _band_score(vt, lo_v, scale, on_o2)
+    s_hi = _band_score(vt, hi_v, scale, on_o2)
+    if s_lo == s_hi:
+        return None
+    return lo_v if s_lo > s_hi else hi_v
 
 
 WINDOW_ENV_TEMPLATE = "NEWS2_STALENESS_WINDOW_{name}_SECONDS"
@@ -147,7 +192,7 @@ class ScoringGate:
     def assess(
         self,
         processed: Sequence[ProcessedVitalSign],
-        context: PatientContext,  # noqa: ARG002 - used by later checks (scale-aware bands)
+        context: PatientContext,
         upstream_findings: Sequence[Finding] = (),
     ) -> GateResult:
         findings: list[Finding] = list(upstream_findings)
@@ -182,6 +227,42 @@ class ScoringGate:
                 )
             )
             inputs.append(dataclasses.replace(pv, is_within_physiological_bounds=True))
+
+        # N-01: between-band values → more severe neighbour (scoring input
+        # only; the measured value in processed_vitals / FHIR is unchanged).
+        o2_inputs = [
+            pv
+            for pv in inputs
+            if pv.original.vital_sign_type is VitalSignType.SUPPLEMENTAL_O2
+            and pv.is_within_physiological_bounds
+        ]
+        on_o2 = (
+            max(o2_inputs, key=lambda pv: pv.original.timestamp).cleaned_value >= 0.5
+            if o2_inputs
+            else False
+        )
+        for i, pv in enumerate(inputs):
+            vt = pv.original.vital_sign_type
+            if (
+                vt not in _GRID_FACTOR
+                or not pv.is_within_physiological_bounds
+                or pv.original.waveform is not None
+                or not math.isfinite(pv.cleaned_value)
+            ):
+                continue
+            snapped = _more_severe_neighbour(vt, pv.cleaned_value, context.spo2_scale, on_o2)
+            if snapped is None:
+                continue
+            findings.append(
+                Finding(
+                    ReasonCode.BETWEEN_BANDS_VALUE,
+                    vt,
+                    "Value lies between two NEWS2 bands; scored in the more severe "
+                    f"adjacent band (as {snapped:g}). Interim rule, HD-E8.",
+                    pv.cleaned_value,
+                )
+            )
+            inputs[i] = dataclasses.replace(pv, cleaned_value=snapped)
 
         admitted = {
             pv.original.vital_sign_type
