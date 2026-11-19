@@ -91,6 +91,9 @@ services:
       # observable in logs within a normal `docker compose up` session,
       # rather than waiting the production default (3600s) to see one tick.
       REATTESTATION_INTERVAL_SECONDS: "30"
+      # F-01: required; the gateway refuses to start without it. Local dev
+      # only -- supply your own value: GATEWAY_API_KEYS=... docker compose up
+      GATEWAY_API_KEYS: "${GATEWAY_API_KEYS:?set GATEWAY_API_KEYS (32+ chars) before docker compose up}"
     volumes:
       - ca-bundle:/ca-bundle:ro
       - gateway-pki:/var/lib/icu-edge-gateway/pki

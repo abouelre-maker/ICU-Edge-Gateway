@@ -74,6 +74,7 @@ ruff check: clean
 ## 5. Local Run (non-containerized)
 
 ```bash
+export GATEWAY_API_KEYS="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"  # required (F-01)
 python -m uvicorn main:app --app-dir src --host 0.0.0.0 --port 8000
 ```
 
@@ -169,6 +170,7 @@ Re-run the Section 5/6 smoke tests against the deployed endpoint, plus one funct
 
 ```bash
 curl -X POST https://<deployed-host>/api/v1/vitals \
+  -H "Authorization: Bearer $GATEWAY_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{"patient_id": "SMOKE-TEST", "samples": [...]}'
 # Confirm: HTTP 200, FHIR Bundle response, X-CDS-Advisory-Only: true header present

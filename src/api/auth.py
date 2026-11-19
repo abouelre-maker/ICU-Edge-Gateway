@@ -1,11 +1,10 @@
 """
 API-key authentication for HTTP routes and the live WebSocket (F-01, F-08).
 
-STATUS: implemented and unit-tested, NOT YET WIRED into create_app() —
-BLOCKED-TEST-CONFLICT F01-1 / F08-1 (docs/assessment/HUMAN_DECISIONS.md):
-~70 existing API tests call the endpoints without credentials. Wiring is one
-line per router (`dependencies=[Depends(require_api_key)]`) plus
-config.validate_gateway_auth_config() in the lifespan.
+STATUS: wired (2026-11-19, HD-E6 option 1). create_app() adds
+`require_api_key` to /api/v1/ingest and /api/v1/vitals, the lifespan calls
+config.validate_gateway_auth_config() (fail closed), and WS /api/v1/live/vitals
+calls `authorize_websocket` before accepting.
 
 Keys come from GATEWAY_API_KEYS (comma-separated, each ≥ 32 characters) and
 are compared as SHA-256 digests with hmac.compare_digest over bytes, so a
@@ -57,12 +56,14 @@ async def authorize_websocket(websocket: WebSocket) -> bool:
     header is present, an Origin on the CORS allow-list. Closes with 1008 and
     returns False when refused.
     """
-    token = _bearer(websocket.headers.get("Authorization", "")) or websocket.query_params.get(
-        "access_token", ""
-    )
+    candidates = [
+        _bearer(websocket.headers.get("Authorization", "")),
+        websocket.query_params.get("access_token", ""),
+    ]
+    token_ok = any(key_is_valid(t) for t in candidates if t)
     origin = websocket.headers.get("Origin")
     origin_ok = origin is None or origin in get_cors_allowed_origins()
-    if not token or not key_is_valid(token) or not origin_ok:
+    if not token_ok or not origin_ok:
         await websocket.close(code=_WS_POLICY_VIOLATION)
         return False
     return True

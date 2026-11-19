@@ -133,6 +133,11 @@ IEC 62304 §5.3 (software architectural design) in comments throughout the codeb
 | `GET` | `/docs` | OpenAPI (Swagger) interactive documentation |
 | `GET` | `/openapi.json` | OpenAPI schema |
 
+`/api/v1/ingest`, `/api/v1/vitals` and the live WebSocket require an API key
+(`Authorization: Bearer <key>`; the WebSocket also accepts `?access_token=<key>`). Keys come from
+`GATEWAY_API_KEYS` (comma-separated, each at least 32 characters). The gateway refuses to start
+without them; it never falls back to open access. `/health` stays open for probes.
+
 Every clinical response carries an `X-CDS-Advisory-Only: true` header and a matching FHIR
 extension — this software never initiates automated treatment.
 
@@ -152,6 +157,7 @@ Run the server locally:
 
 ```bash
 export CORS_ALLOWED_ORIGINS="http://localhost:3000"   # required in production; see below
+export GATEWAY_API_KEYS="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 python -m uvicorn main:app --app-dir src --host 0.0.0.0 --port 8000
 ```
 

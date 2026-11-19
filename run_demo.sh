@@ -131,6 +131,16 @@ check_port "$DASHBOARD_PORT" dashboard
 check_port "$MLLP_PORT"      mllp
 log "  $GATEWAY_PORT, $DASHBOARD_PORT, $MLLP_PORT all free"
 
+# ── 0. API key (F-01/F-08) ───────────────────────────────────────────────────
+# The gateway refuses to start without GATEWAY_API_KEYS. For a local demo a
+# fresh random key is generated per run (never written to disk) and handed to
+# the dashboard and the injector as GATEWAY_API_KEY.
+if [[ -z "${GATEWAY_API_KEYS:-}" ]]; then
+    GATEWAY_API_KEYS="$("$PY_APP" -c 'import secrets; print(secrets.token_urlsafe(32))')"
+fi
+export GATEWAY_API_KEYS
+export GATEWAY_API_KEY="${GATEWAY_API_KEY:-${GATEWAY_API_KEYS%%,*}}"
+
 # ── 1. Gateway ──────────────────────────────────────────────────────────────
 
 log "Starting gateway (uvicorn, MLLP enabled)..."

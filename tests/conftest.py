@@ -59,3 +59,54 @@ for _vital_type in (
     _os.environ.setdefault(
         f"NEWS2_STALENESS_WINDOW_{_vital_type}_SECONDS", str(10 * 365 * 24 * 3600)
     )
+
+
+# ── Test-only API key (F01-1 / F08-1; HD-E6 option 1 approved 2026-11-19) ────
+# APPEND-ONLY block. Production refuses to start without GATEWAY_API_KEYS
+# (fail closed). The suite gets ONE test-only key, sent by default by:
+#   * the `client` fixture below (redefines the one above: same app, same
+#     transport, plus the Authorization header), and
+#   * every starlette TestClient constructed WITHOUT an explicit `headers=`
+#     argument (HTTP and WebSocket share the client's default headers).
+# A test that needs an unauthenticated request passes `headers={}` to
+# TestClient, or uses the `unauthenticated_client` fixture. No existing test
+# or assertion is edited. setdefault: an explicit environment still wins.
+TEST_API_KEY = "test-only-gateway-api-key-not-a-secret-0001"
+TEST_AUTH_HEADERS = {"Authorization": f"Bearer {TEST_API_KEY}"}
+_os.environ.setdefault("GATEWAY_API_KEYS", TEST_API_KEY)
+
+
+@pytest.fixture
+async def client() -> AsyncGenerator[AsyncClient, None]:  # noqa: F811
+    """Authenticated async client (see the block comment above)."""
+    app = create_app()
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+        timeout=30.0,
+        headers=TEST_AUTH_HEADERS,
+    ) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+async def unauthenticated_client() -> AsyncGenerator[AsyncClient, None]:
+    """Same app, no credentials: for tests that assert a 401."""
+    app = create_app()
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test", timeout=30.0
+    ) as test_client:
+        yield test_client
+
+
+@pytest.fixture(autouse=True)
+def _default_test_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+    from starlette.testclient import TestClient
+
+    original_init = TestClient.__init__
+
+    def _init(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+        kwargs.setdefault("headers", TEST_AUTH_HEADERS)
+        original_init(self, *args, **kwargs)
+
+    monkeypatch.setattr(TestClient, "__init__", _init)

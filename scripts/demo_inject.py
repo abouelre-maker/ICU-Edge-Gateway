@@ -91,10 +91,12 @@ import asyncio
 import contextlib
 import json
 import math
+import os
 import random
 import signal
 import sys
 import time
+import urllib.parse
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -151,6 +153,16 @@ async def _send_mllp(host: str, port: int, message: str) -> str:
         await writer.wait_closed()
 
 
+def _api_key() -> str:
+    """F-01: the gateway requires an API key; run_demo.* exports GATEWAY_API_KEY."""
+    return os.environ.get("GATEWAY_API_KEY", "")
+
+
+def _live_ws_url(host: str, port: int) -> str:
+    """F-08: the live channel takes the key as access_token (header-less clients)."""
+    return f"ws://{host}:{port}/api/v1/live/vitals?access_token={urllib.parse.quote(_api_key())}"
+
+
 async def _wait_for_delta(ws_url: str, patient_id: str, timeout_s: float) -> dict:
     async with websockets.connect(ws_url, open_timeout=timeout_s) as ws:
         deadline = time.monotonic() + timeout_s
@@ -177,7 +189,7 @@ async def _run(args: argparse.Namespace) -> dict:
     ts1 = time.strftime("%Y%m%d%H%M%S", time.gmtime(now + 1))
     message = _oru_message(patient_id, msg_id, ts0, ts1)
 
-    ws_url = f"ws://{args.gateway_host}:{args.http_port}/api/v1/live/vitals"
+    ws_url = _live_ws_url(args.gateway_host, args.http_port)
     delta_task = asyncio.ensure_future(
         _wait_for_delta(ws_url, patient_id, args.timeout)
     )
@@ -534,7 +546,10 @@ async def _send_http(
     request = urllib.request.Request(  # nosec B310 - fixed http scheme, local demo host
         url,
         data=message.encode("utf-8"),
-        headers={"Content-Type": "text/plain; charset=utf-8"},
+        headers={
+            "Content-Type": "text/plain; charset=utf-8",
+            "Authorization": f"Bearer {_api_key()}",
+        },
         method="POST",
     )
     loop = asyncio.get_running_loop()
@@ -684,7 +699,7 @@ async def _run_continuous(args: argparse.Namespace) -> int:
     observer: _News2Observer | None = None
     if not args.no_observer:
         observer = _News2Observer(
-            f"ws://{args.gateway_host}:{args.http_port}/api/v1/live/vitals"
+            _live_ws_url(args.gateway_host, args.http_port)
         )
         observer.start()
         await asyncio.sleep(0.5)  # let the WS register before the first send

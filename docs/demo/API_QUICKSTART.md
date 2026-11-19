@@ -36,6 +36,18 @@ Interactive documentation:
 
 ---
 
+## Authentication
+
+`/api/v1/ingest`, `/api/v1/vitals` and the WebSocket require an API key. The
+gateway reads keys from `GATEWAY_API_KEYS` (comma-separated, each at least 32
+characters) and refuses to start without them. `run_demo.*` generates a fresh
+key per run and exports it as `GATEWAY_API_KEY`; the examples below use it.
+A missing or wrong key returns `401` with `WWW-Authenticate: Bearer`.
+
+```bash
+export GATEWAY_API_KEY="<the key the gateway was started with>"
+```
+
 ## `GET /health`
 
 ```bash
@@ -91,6 +103,7 @@ printf 'OBX|6|NM|57834-7^Oxygen therapy^LN||0||||||F|||20260821120000\r'        
 printf 'OBX|7|ST|76270-8^AVPU score^LN||A||||||F|||20260821120000\r'                               >> msg.hl7
 
 curl -s -D - -X POST 'http://localhost:8000/api/v1/ingest?spo2_scale=SCALE_1' \
+     -H "Authorization: Bearer $GATEWAY_API_KEY" \
      -H 'Content-Type: text/plain' --data-binary @msg.hl7
 ```
 
@@ -110,6 +123,7 @@ parameter.
 
 ```bash
 curl -s -X POST http://localhost:8000/api/v1/vitals \
+  -H "Authorization: Bearer $GATEWAY_API_KEY" \
   -H 'Content-Type: application/json' -d '{
     "patient_id": "PT-DEMO-002",
     "spo2_scale": "SCALE_2",
@@ -253,8 +267,11 @@ the NEWS2 `Observation`.
 
 ## WebSocket — `ws://localhost:8000/api/v1/live/vitals`
 
-No query parameters, no authentication, no subprotocol. Every connected
-client receives every delta for every patient; demultiplex by `patient_id`.
+Requires the API key, as `Authorization: Bearer <key>` or as the
+`access_token` query parameter (browsers cannot set WebSocket headers). When
+an `Origin` header is sent it must be on `CORS_ALLOWED_ORIGINS`. A refused
+connection is closed with code 1008. No subprotocol. Every connected client
+receives every delta for every patient; demultiplex by `patient_id`.
 
 **Push-only. There is no snapshot frame on connect** — a newly connected
 client sees nothing until the next message is ingested. This is by design, not
@@ -281,10 +298,12 @@ Exactly one frame type is emitted:
   arrivals.
 
 ```python
-import asyncio, json, websockets
+import asyncio, json, os, urllib.parse, websockets
+
+KEY = urllib.parse.quote(os.environ["GATEWAY_API_KEY"])
 
 async def main():
-    async with websockets.connect("ws://localhost:8000/api/v1/live/vitals") as ws:
+    async with websockets.connect(f"ws://localhost:8000/api/v1/live/vitals?access_token={KEY}") as ws:
         async for raw in ws:
             d = json.loads(raw)
             n = d.get("news2") or {}

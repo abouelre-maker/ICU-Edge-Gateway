@@ -128,6 +128,13 @@ call :checkport %MLLP_PORT%      mllp      || goto :fail
 echo     %GATEWAY_PORT%, %DASHBOARD_PORT%, %MLLP_PORT% all free
 
 REM ------------------------------------------------------------------- 1. gateway
+REM -- API key (F-01/F-08): the gateway refuses to start without GATEWAY_API_KEYS.
+REM    A fresh random key is generated per run (never written to disk).
+if not defined GATEWAY_API_KEYS (
+    for /f "usebackq delims=" %%K in (`"%PY_APP%" -c "import secrets; print(secrets.token_urlsafe(32))"`) do set "GATEWAY_API_KEYS=%%K"
+)
+if not defined GATEWAY_API_KEY for /f "tokens=1 delims=," %%K in ("%GATEWAY_API_KEYS%") do set "GATEWAY_API_KEY=%%K"
+
 echo   Starting gateway ^(uvicorn, MLLP enabled^)...
 start "ICU Gateway" cmd /k "cd /d "%REPO_ROOT%" && set MLLP_ENABLED=1&& set MLLP_PORT=%MLLP_PORT%&& set PYTHONPATH=src&& "%PY_APP%" -m uvicorn main:app --host 127.0.0.1 --port %GATEWAY_PORT%"
 

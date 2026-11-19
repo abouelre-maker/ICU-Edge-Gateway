@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager, suppress
 
 import structlog
 import uvicorn
+from api.auth import require_api_key
 from api.body_limit import BodySizeLimitMiddleware
 from api.v1.fhir_subscription import router as fhir_subscription_router
 from api.v1.health import router as health_router
@@ -37,9 +38,10 @@ from config import (
     get_provisioning_ca_bundle_path,
     get_provisioning_enabled,
     get_reattestation_interval_seconds,
+    validate_gateway_auth_config,
     validate_news2_scoring_config,
 )
-from fastapi import FastAPI, Request, status
+from fastapi import Depends, FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from infrastructure.adapters.hl7v2_adapter import HL7v2Adapter
@@ -101,6 +103,8 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     """
     # A2 / decision Q1(b): refuse to start without staleness windows.
     validate_news2_scoring_config()
+    # F-01: refuse to start without API keys (fail closed, never open access).
+    validate_gateway_auth_config()
     app.state.start_time = time.monotonic()
     app.state.forward_buffer = StoreAndForwardRingBuffer(
         capacity=_FORWARD_BUFFER_CAPACITY
@@ -293,8 +297,12 @@ def create_app() -> FastAPI:
 
     # ── Routers ────────────────────────────────────────────────────────────────
     app.include_router(health_router)  # GET  /health
-    app.include_router(ingest_router, prefix="/api/v1")  # POST /api/v1/ingest
-    app.include_router(vitals_router, prefix="/api/v1")  # POST /api/v1/vitals
+    # F-01: every clinical-data route requires `Authorization: Bearer <key>`.
+    # /health stays open for liveness probes; the subscription API keeps its
+    # own registration secret; the WebSocket authorises itself (F-08).
+    _auth = [Depends(require_api_key)]
+    app.include_router(ingest_router, prefix="/api/v1", dependencies=_auth)  # POST /api/v1/ingest
+    app.include_router(vitals_router, prefix="/api/v1", dependencies=_auth)  # POST /api/v1/vitals
     app.include_router(live_router, prefix="/api/v1")  # WS   /api/v1/live/vitals
     app.include_router(
         fhir_subscription_router, prefix="/api/v1"
