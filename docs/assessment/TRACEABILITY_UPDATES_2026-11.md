@@ -1,0 +1,34 @@
+# Traceability updates pending regulatory review (2026-11-19)
+
+The 2026-11-19 hardening changed behaviour that the controlled documents describe.
+Those documents (RMF-001, SRS-001, SAD-001, RTM-001) were **not edited**: changes to
+hazard records and requirements need the clinical safety reviewer (HD-E4). This list
+comes from a read-only SaMD safety review of the branch; every ID below exists in the
+cited document. No new ID has been invented — where one is needed, it says so.
+
+## RMF-001 Risk Management File
+| Hazard | Location | Update needed |
+|---|---|---|
+| HAZARD-STREAM-001 | RMF-001 §HAZARD-STREAM-001 (review trigger "any change to mllp_listener.py framing logic" has fired) | Oversized frame now answered AR then closed (F03-1); add MSH-10 de-duplication and its residual risk (only byte-identical retransmissions are skipped; reused ID with new content is processed and logged). |
+| HAZARD-STREAM-006 | RMF-001 §HAZARD-STREAM-006 | "Delivery is trusted (not re-checked)" is stale: delivery re-resolves the host and requires public addresses; redirects never followed; legacy IP forms refused. Residual: sub-second DNS-rebinding window. |
+| HAZARD-STREAM-009 | RMF-001 §HAZARD-STREAM-009 | Add evidence: digest comparison of the registration secret, subscription cap (50), in-flight cap (100), header validation and redaction. |
+| (new ID needed) | — | Unauthenticated clinical data injection on HTTP/WS (F-01/F-08) — mitigated by API keys; no existing hazard covers it. |
+| (new ID needed) | — | PHI disclosure via MQTT topics and logs (F-04/F-12) — mitigated by HMAC topic segment and log pseudonymisation. |
+
+## SRS-001
+- REQ-API-001 covers only the ValueError handler. The RequestValidationError handler (422
+  without the offending input) has no requirement ID — new requirement needed.
+- Authentication (GATEWAY_API_KEYS, fail-closed startup) has no requirement ID — new requirement needed.
+
+## SAD-001 stale statements
+- Base image named as python:3.11-alpine3.19 — now python:3.11-alpine3.23 pinned by digest, installed from requirements.lock with hashes.
+- Two exception handlers listed — now three (RequestValidationError added).
+- "No structlog.configure call" — src/infrastructure/log_privacy.py now prepends a pseudonymisation processor.
+- Config accessor count ("17") — new accessors: get_gateway_api_keys, validate_gateway_auth_config, get_mqtt_topic_key, get_mllp_allowed_networks.
+- MLLPListener line numbers; MQTT topic format (now prefix/HMAC segment, MQTT_TOPIC_KEY required); subscription delivery path.
+- Bundle structure: no note/extension/total; meta.tag version; content-derived IDs (H-01..H-04).
+
+## RTM-001
+- REQ-API-001 row: add tests/integration/test_f12_f13_privacy.py.
+- HAZARD-STREAM-001..004 rows: add tests/integration/test_a8_mllp_dedup.py, tests/integration/test_f01_f08_auth_wired.py, tests/unit/test_f01_f08_auth.py.
+- FHIR rows: add tests/unit/test_h01_h06_fhir_validity.py.

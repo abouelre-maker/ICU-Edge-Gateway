@@ -13,7 +13,7 @@ Update the test counts below at the end of every Track E phase, with the date.
 | 2026-09-30 | `hardening/assessment-2026-09` (Step 1 start) | 816 passed, 1 xfailed | 95% | ruff clean, mypy clean | Python 3.11.9 |
 | 2026-09-30 | `hardening/assessment-2026-09` @ `96d59cb` (end of Phase 1) | 943 passed, 4 xfailed (1 original + 3 strict-xfail documenting blocked A5 sub-items) | 95% | ruff clean, mypy clean | Python 3.11.9 |
 | 2026-09-30 | `hardening/assessment-2026-09` @ `6deea8d` (Phase 2, gate not passed) | 973 passed, 4 xfailed | 95% (last measured at Phase 1) | ruff clean, mypy clean | Python 3.11.9 |
-| 2026-11-19 | `hardening/v2-on-public-main` (Phase 2 gate passed; Phase 3 security items) | 1045 passed, 4 xfailed | 95% (3130 statements) | ruff, mypy, bandit clean; pip-audit clean on requirements.txt | Python 3.11.9 |
+| 2026-11-19 | `hardening/v2-on-public-main` (Phase 2 gate passed; Phase 3 security and FHIR items) | 1056 passed, 4 xfailed | 95% (3130 statements) | ruff, mypy, bandit clean; pip-audit clean on requirements.txt | Python 3.11.9 |
 
 ## TRUE — may be said
 
@@ -47,11 +47,11 @@ Status column is updated as Track E closes findings (see `ASSESSMENT_2026-09.md`
 
 | Gap | Findings | Status |
 |---|---|---|
-| No authentication or TLS on ingest paths | F-01, F-08, F-09/10 | OPEN — HTTP/WS auth implemented but NOT enabled (F01-1/F08-1); MLLP limited to an allow-list (loopback by default); no TLS |
+| No TLS on ingest paths | F-09/10 | OPEN — terminate TLS at a reverse proxy (HD-E5). Authentication CLOSED 2026-11-19: API key on ingest/vitals and the WebSocket (fail-closed startup); MLLP allow-list, loopback bind by default |
 | Some missing inputs default to "normal" | A1 | CLOSED 2026-09-30 (missing ACVPU/O2 ⇒ INCOMPLETE) |
 | No staleness logic | A2 | CLOSED 2026-09-30, except sub-item A2-1 (absent MSH-7 + OBX-14 ⇒ placeholder time, never scored) awaiting decision |
-| FHIR bundles with warnings are not strictly valid R4 | H-01 | OPEN |
-| MLLP ACKs not fully conformant | A8, F-03 | PARTIAL: A8 fixed except MSH-10 de-duplication (A8-1); F-03 fixed except AR on above-cap frames (F03-1) |
+| FHIR bundles not strictly valid R4 | H-01..H-06 | CLOSED 2026-11-19 (H-06 SNOMED 6942003 marked TODO-VERIFY; H-07/H-08 remain OPEN) |
+| MLLP ACKs not fully conformant | A8, F-03 | CLOSED 2026-11-19 (MSH-10 de-duplication of byte-identical retransmissions; AR on above-cap frames) |
 | No durable queue | A8 | OPEN |
 | No high availability | — | OPEN (not in scope) |
 | Regulatory classification unresolved | R-01, R-02 | OPEN |

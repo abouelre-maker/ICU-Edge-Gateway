@@ -40,3 +40,6 @@ ported one-to-one (same messages) onto the public `main` as `hardening/v2-on-pub
 | 2026-11-19 | 42fe1e6 | F-05, F-06/07 | SSRF bypass forms, connect-time address check, no redirects; subscription and delivery caps; digest comparison; header validation and redaction |
 | 2026-11-19 | 4a5ae8e | F-12, F-13 | Pseudonymised identifiers in logs; 422 without input echo; no library version on /health |
 | 2026-11-19 | ff23e82 | S-01..S-06 | Alpine 3.23 by digest; hashed lockfile; certifi and pytest-stack upgrades; SHA-pinned actions; Trivy fails on fixable HIGH/CRITICAL; SBOM |
+| 2026-11-19 | 7e38e62 | A8-1 | Safety-review fix: reused MSH-10 with new content is processed, not dropped |
+| 2026-11-19 | 52735bd | H-01..H-06 | Valid R4 Bundle: no note/extension/total, meta.tag version, UUIDv5 IDs, urn:uuid fullUrls, logical reference for unsafe identifiers, distinct consciousness code (HD-E9 approved) |
+| 2026-11-19 | (this) | E3 | Docs: stale auth statements fixed; TRACEABILITY_UPDATES_2026-11.md for the regulatory reviewer |

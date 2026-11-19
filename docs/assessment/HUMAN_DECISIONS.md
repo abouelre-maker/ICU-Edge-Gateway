@@ -58,8 +58,7 @@ Each item: what is needed, options, recommendation, and what it blocks. Status i
 - **Why that is wrong:** F-01 (PoC-confirmed): unauthenticated clinical data injection.
 - **Now:** `src/api/auth.py` (`require_api_key`, SHA-256 + `hmac.compare_digest`, non-ASCII ⇒
   401) and `config.validate_gateway_auth_config()` (fail closed: no key or key < 32 chars ⇒
-  refuse to start) are implemented and tested on a standalone app, but **not wired** into
-  `create_app()`. The service is therefore still unauthenticated.
+  refuse to start) are implemented and tested. **Wired 2026-11-19** (option 1 approved).
 - **Options:** (1) authorise one append-only block in `tests/conftest.py` that sets a test-only
   `GATEWAY_API_KEYS` and overrides the `client` fixture to send `Authorization: Bearer <test key>`
   (no existing test or assertion edited), then wire the dependency — **recommended**;
@@ -121,7 +120,8 @@ Each item: what is needed, options, recommendation, and what it blocks. Status i
 - **Options:** (1) amend the test to send three distinct MSH-10 values (and add a test that a
   repeated MSH-10 is ACKed AA without re-forwarding) — **recommended**; (2) keep re-processing,
   WONTFIX (duplicates handled downstream).
-- **State now:** de-duplication **not implemented**; the rest of A8 is implemented.
+- **State now:** implemented 2026-11-19 (option 1 approved). Only byte-identical retransmissions are
+  skipped; a reused MSH-10 with different content is processed and logged (safety review).
 
 #### A5-1 — site-unspecified `T1`/`T2` mapped to core temperature
 - **Tests (5):** `tests/unit/test_demo_streamer.py::TestEveryEmittedObxCodeIsAlreadyMapped::test_no_obx_is_skipped_for_any_stage_of_any_bed[ICU-BED-03]`,
@@ -212,5 +212,6 @@ finding is implemented.
 - **Options:** (1) approve test amendments per item and a new location for the advisory
   statement (e.g. a Provenance or an Observation note) — recommended; (2) keep as documented
   known gaps.
-- **Status:** OPEN
+- **Status:** ANSWERED 2026-11-19 — Housam approved all six ("comprehensive approval"). Done in
+  52735bd; the advisory statement did not need to move (it is on the NEWS2 Observation.note).
 

@@ -337,7 +337,8 @@ Dockerfile                 Multi-stage, Alpine, non-root, IEC 62304-annotated
   (HAZARD-PROTO-002).
 - The MLLP streaming path applies one process-wide SpO₂ scale; per-patient scale selection
   is future work.
-- The demonstration stack has no authentication and no TLS on MLLP; it is for local use only.
+- The gateway requires an API key (`GATEWAY_API_KEYS`); there is no TLS in the process, so
+  terminate TLS at a reverse proxy. The demonstration stack is for local use only.
 - The Docker image (≈372 MB) exceeds the project's own 150 MB edge budget
   ([GAP-DOCKER-SIZE-001](regulatory/findings/GAP-DOCKER-SIZE-001.md)).
 - Two DSP residual risks (HAZARD-DSP-005, HAZARD-DSP-006) await review by a credentialed

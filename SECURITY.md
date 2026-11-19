@@ -19,4 +19,4 @@ In scope: the gateway source code in `src/`, the container image definition, and
 infrastructure templates in `infra/` and `deploy/`.
 
 Out of scope: the local demonstration stack (`docker-compose.yml`, `demo/`), which
-intentionally runs without authentication or TLS and must only be used on a local machine.
+runs with a per-run random API key but without TLS and must only be used on a local machine.

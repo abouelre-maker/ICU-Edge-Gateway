@@ -25,7 +25,7 @@ BLOCKED-TEST-CONFLICT · DEFERRED-TO-CI · WONTFIX.
 | A5 | C (partial) | High | PARTIAL — BLOCKED-TEST-CONFLICT A5-1, A5-2 | f1b5730 | tests/unit/test_a5_code_mapping.py (3 strict-xfail) | NIBP/ABP collide; T1/T2 → core temperature; coding system ignored for proprietary codes. LOINC `2708-6` (SaO2) mapped as SpO2 in the adapter input table (`:61`). "Pulse pressure → HR" not reproduced. |
 | A6 | C | Critical | CLOSED | 67883d9 | tests/unit/test_a6_critical_values.py | Critical values are classed as artifacts → no score, HTTP 200, no machine-readable outcome; the value is tagged `[ARTIFACT]`, so it cannot be told apart from a lead-off. |
 | A7 | C-R | High | CLOSED | 622bd7d | tests/unit/test_a7_patient_identity.py | Only the first PID-3 repetition is read; empty PID-3 → `UNKNOWN` (patient merge); MSH-9 not checked (`ADT^A01` accepted); HL7 escapes not decoded. |
-| A8 | C | High | CLOSED except durable queue (A8-1 closed 2026-11-19: MSH-10 de-duplication) | 7a2a175, 99ac5e2 | tests/integration/test_a8_mllp_ack.py; tests/integration/test_a8_mllp_dedup.py | MSA-2 did not echo MSH-10; AR never sent; retransmissions re-processed. Durable store-and-forward queue still deferred. |
+| A8 | C | High | CLOSED except durable queue (A8-1 closed 2026-11-19: MSH-10 de-duplication) | 7a2a175, 99ac5e2, 7e38e62 | tests/integration/test_a8_mllp_ack.py; tests/integration/test_a8_mllp_dedup.py | MSA-2 did not echo MSH-10; AR never sent; retransmissions re-processed. Durable store-and-forward queue still deferred. |
 | N-01 | C | High | CLOSED (interim rule; HD-E8) | c73e6e8 | tests/unit/test_n01_between_bands.py | Fractional values between integer bands: RR=8.5 scores 1 (reassuring direction). No discretisation policy. |
 | N-02 | C | Medium | CLOSED | 5c3d2ee | tests/unit/test_n02_preliminary_status.py | OBX-11 `P` emitted in FHIR as `status: "final"`. |
 | V-01 | C | High | CLOSED as data+provenance; true closure BLOCKED on HD-E3 | 96d59cb | tests/unit/test_v01_vendor_code_table.py | Vendor OBX tables (5 vendors) are unsourced; docs claim multi-vendor support. |
@@ -43,12 +43,12 @@ BLOCKED-TEST-CONFLICT · DEFERRED-TO-CI · WONTFIX.
 
 | ID | Phase 0 | Severity | Status | Commit | Tests | Finding |
 |---|---|---|---|---|---|---|
-| H-01 | C | High | OPEN | | | `Bundle.note` / `Bundle.extension` are not valid R4 (`bundle_assembler.py:154,164`). |
-| H-02 | C | Medium | OPEN | | | `Bundle.total` on a collection bundle (bdl-1). |
-| H-03 | C | Medium | OPEN | | | `uuid4` resource IDs → non-idempotent retries. |
-| H-04 | C | Medium | OPEN | | | `urn:uuid:DEVICE-PHILIPS` is not a valid UUID URN (`ingest.py:176`). |
-| H-05 | C | Medium | OPEN | | | `Patient/{id}` unsanitised against the FHIR id rule. |
-| H-06 | C | Medium | OPEN | | | SNOMED `248234008` used as both code and value. |
+| H-01 | C | High | CLOSED 2026-11-19 | 52735bd | tests/unit/test_h01_h06_fhir_validity.py | Bundle.note / Bundle.extension removed; version in meta.tag; warnings in the OperationOutcome. |
+| H-02 | C | Medium | CLOSED 2026-11-19 | 52735bd | tests/integration/test_fhir_bundle.py | No Bundle.total on collection. |
+| H-03 | C | Medium | CLOSED 2026-11-19 | 52735bd | tests/unit/test_h01_h06_fhir_validity.py | Content-derived UUIDv5 IDs. |
+| H-04 | C | Medium | CLOSED 2026-11-19 | 52735bd | tests/unit/test_h01_h06_fhir_validity.py | Every fullUrl a valid urn:uuid. |
+| H-05 | C | Medium | CLOSED 2026-11-19 | 52735bd | tests/unit/test_h01_h06_fhir_validity.py | Unsafe identifier -> subject.identifier; still never scored. |
+| H-06 | C | Medium | CLOSED 2026-11-19 (code TODO-VERIFY) | 52735bd | tests/unit/test_h01_h06_fhir_validity.py | Observation.code SNOMED 6942003; value keeps the AVPU finding. |
 | H-07 | C | Medium | OPEN | | | Interpretation mapping wrong (risk LOW → `L` "Low"). |
 | H-08 | C | Low | OPEN | | | SNOMED `1239842005` for NEWS2 is TODO-VERIFY. Input-side `2708-6` moved to A5. |
 
