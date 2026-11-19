@@ -89,9 +89,15 @@ async def test_processing_does_not_block_the_event_loop(client: AsyncClient) -> 
             await asyncio.sleep(0.01)
             worst = max(worst, time.perf_counter() - t0 - 0.01)
 
+    # Encode the request body BEFORE measuring: the test client runs on the same
+    # event loop, so serialising 15 000 samples inside the window measured the
+    # test's own work, not the server's (flaky on slow CI runners).
+    body = json.dumps(_waveform_payload(15_000))
     task = asyncio.create_task(ticker())
     await asyncio.sleep(0.03)  # let the ticker start before the request
-    resp = await client.post("/api/v1/vitals", json=_waveform_payload(15_000))
+    resp = await client.post(
+        "/api/v1/vitals", content=body, headers={"Content-Type": "application/json"}
+    )
     await asyncio.sleep(0.03)  # let the ticker observe any lateness
     stop = True
     await task
