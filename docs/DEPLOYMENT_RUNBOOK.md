@@ -90,14 +90,47 @@ curl http://localhost:8000/docs
 
 ## 6. Containerized Deployment
 
+Signed images are published to GitHub Container Registry on every push to `main`
+(see section 6b). Verify the signature before running one:
+
 ```bash
-docker build -t icu-edge-gateway:v1.0.0 .
+cosign verify ghcr.io/abouelre-maker/icu-edge-gateway:main \
+  --certificate-identity-regexp 'https://github.com/abouelre-maker/ICU-Edge-Gateway/' \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+```bash
 docker run -d \
   --name icu-edge-gateway \
-  -p 8000:8000 \
+  -p 127.0.0.1:8000:8000 \
+  -e GATEWAY_API_KEYS="<32+ random characters>" \
+  --env-file news2-staleness.env \
   -e CORS_ALLOWED_ORIGINS="https://your-ehr-frontend.example.org" \
-  icu-edge-gateway:v1.0.0
+  ghcr.io/abouelre-maker/icu-edge-gateway:main
 ```
+
+`news2-staleness.env` holds the seven `NEWS2_STALENESS_WINDOW_*_SECONDS` values approved by
+your clinical safety officer. `deploy/profiles/news2-staleness.demo.env` shows the format;
+its values are a labelled demonstration profile, **not clinically validated**.
+
+### 6a. TLS (required outside a single machine)
+
+The gateway does not terminate TLS itself. Publish it only on loopback (as above, and
+`MLLP_HOST=127.0.0.1`) and put `deploy/reverse-proxy/nginx.conf` in front:
+
+- 443 → HTTPS and WSS to `127.0.0.1:8000` (HSTS, TLS 1.2+, 1 MB body cap)
+- 2576 → MLLP over TLS to `127.0.0.1:2575`, with optional mutual TLS for monitors
+
+Behind the proxy every MLLP peer appears as `127.0.0.1`, so the `MLLP_ALLOWED_CLIENTS`
+allow-list no longer distinguishes senders: enable the commented `ssl_verify_client` block
+(mutual TLS) to control which devices may connect. CI validates the file with `nginx -t`.
+
+### 6b. Image signing
+
+`.github/workflows/release-image.yml` builds the image on every push to `main` and on
+`v*` tags, pushes it to `ghcr.io/abouelre-maker/icu-edge-gateway`, attaches the CycloneDX
+SBOM, and signs both with Sigstore cosign (keyless, GitHub OIDC). No signing key is stored
+anywhere.
 
 The image's built-in `HEALTHCHECK` polls `GET /health` every 30s (10s timeout, 15s start
 period, 3 retries) — confirm `docker ps` reports `healthy` before considering the deployment
