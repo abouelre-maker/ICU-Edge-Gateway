@@ -1,6 +1,8 @@
 # Hardening Changelog
 
-Chronological record of every change on `hardening/assessment-2026-09`.
+Chronological record of every change. Commit IDs dated 2026-09-30 are those of the
+original branch `hardening/assessment-2026-09`; on 2026-11-19 its engineering commits were
+ported one-to-one (same messages) onto the public `main` as `hardening/v2-on-public-main`.
 
 ## Lock-file removals (standing permission, continuation directive §1)
 
@@ -12,11 +14,7 @@ Chronological record of every change on `hardening/assessment-2026-09`.
 
 | Date | Commit | Item | Summary |
 |---|---|---|---|
-| 2026-09-30 | d5b636d | E0 | Phase 0 recorded; canonical claims; superseded commercial artifacts. Note: commits d5b636d…42cf67e have an invisible UTF-8 BOM at the start of the subject line (PowerShell 5.1 `Set-Content -Encoding utf8`); left as-is because amending history is forbidden (R2). |
-| 2026-09-30 | 2f058e9 | C-0 | Executive plan |
-| 2026-09-30 | 2510b89 | C-1 | First-customer list + tracking sheet |
-| 2026-09-30 | d03e2ec | C-2 | Discovery kit EN + AR |
-| 2026-09-30 | 42cf67e | C-4.4 | Human-gates checklist + evidence ledger |
+| 2026-09-30 | d5b636d | E0 | Phase 0 recorded; canonical claims. Note: commits d5b636d…42cf67e have an invisible UTF-8 BOM at the start of the subject line (PowerShell 5.1 `Set-Content -Encoding utf8`); left as-is because amending history is forbidden (R2). |
 | 2026-09-30 | 0ec6549 | E0 | Step 1–2 research corrections (FDA date, MDDS, Replay default, PDPL, evidence labels) |
 | 2026-09-30 | 67883d9 | A6 | ScoreOutcome contract; critical vs artifact; headers; OperationOutcome |
 | 2026-09-30 | 9d70a0e | A1 | Missing/misread ACVPU and O2 ⇒ INCOMPLETE. Note: 4 existing tests red at this commit by design until the next two commits |
@@ -36,3 +34,9 @@ Chronological record of every change on `hardening/assessment-2026-09`.
 | 2026-09-30 | f0a358e | F-03 | MLLP limit=, timeouts, connection cap; F03-1 blocked. Note: commit message has a mojibake dash (PowerShell encoding), not amended (R2) |
 | 2026-09-30 | e9dc4e3 | F-04 | patient_id validation; MQTT dead-letter; F04-1 blocked |
 | 2026-09-30 | 6deea8d | F-01/F-08 | MLLP allow-list wired; auth guards implemented, not wired (F01-1, F01-2, F08-1) |
+| 2026-11-19 | (port) | E2 | 21 engineering commits ported onto public main fdc5370; 973 passed, 4 xfailed on the new base |
+| 2026-11-19 | 0ade939 | F-01/F-08 | API key wired on ingest/vitals, fail-closed startup, WebSocket guard wired; conftest append-only test key (HD-E6 approved). Phase 2 gate: no key 401, wrong key 401, WS refused, key 200 (live uvicorn) |
+| 2026-11-19 | 99ac5e2 | F01-2, F03-1, F04-1, A8-1 | Loopback MLLP default, AR on oversize, opaque MQTT topic (MQTT_TOPIC_KEY), MSH-10 de-duplication |
+| 2026-11-19 | 42fe1e6 | F-05, F-06/07 | SSRF bypass forms, connect-time address check, no redirects; subscription and delivery caps; digest comparison; header validation and redaction |
+| 2026-11-19 | 4a5ae8e | F-12, F-13 | Pseudonymised identifiers in logs; 422 without input echo; no library version on /health |
+| 2026-11-19 | ff23e82 | S-01..S-06 | Alpine 3.23 by digest; hashed lockfile; certifi and pytest-stack upgrades; SHA-pinned actions; Trivy fails on fixable HIGH/CRITICAL; SBOM |

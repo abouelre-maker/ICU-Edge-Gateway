@@ -1,8 +1,7 @@
 # Canonical Claims — Single Source of Truth
 
-**Status:** authoritative from 2026-09-30. **Supersedes `claude/verified_claims_sheet.md`**,
-which still contains now-disproven wording. Both engineering (Track E) and
-commercial (Track C) work use this file until Phase 7 reconciles the old sheet.
+**Status:** authoritative from 2026-09-30. Supersedes every earlier claims sheet; any
+statement about this software is checked against this file.
 
 Update the test counts below at the end of every Track E phase, with the date.
 
@@ -14,6 +13,7 @@ Update the test counts below at the end of every Track E phase, with the date.
 | 2026-09-30 | `hardening/assessment-2026-09` (Step 1 start) | 816 passed, 1 xfailed | 95% | ruff clean, mypy clean | Python 3.11.9 |
 | 2026-09-30 | `hardening/assessment-2026-09` @ `96d59cb` (end of Phase 1) | 943 passed, 4 xfailed (1 original + 3 strict-xfail documenting blocked A5 sub-items) | 95% | ruff clean, mypy clean | Python 3.11.9 |
 | 2026-09-30 | `hardening/assessment-2026-09` @ `6deea8d` (Phase 2, gate not passed) | 973 passed, 4 xfailed | 95% (last measured at Phase 1) | ruff clean, mypy clean | Python 3.11.9 |
+| 2026-11-19 | `hardening/v2-on-public-main` (Phase 2 gate passed; Phase 3 security items) | 1045 passed, 4 xfailed | 95% (3130 statements) | ruff, mypy, bandit clean; pip-audit clean on requirements.txt | Python 3.11.9 |
 
 ## TRUE — may be said
 

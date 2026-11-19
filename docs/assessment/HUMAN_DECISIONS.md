@@ -9,7 +9,7 @@ Each item: what is needed, options, recommendation, and what it blocks. Status i
 - **Blocks:** any external distribution; repository access for anyone else.
 - **Options:** (a) obtain written confirmation from the university / any employer that
   Housam owns the code; (b) proceed without it (not recommended).
-- **Recommendation:** (a), before any outreach. See `docs/commercial/2026-10/04_HUMAN_GATES_CHECKLIST.md`.
+- **Recommendation:** (a), before any external distribution.
 - **Status:** OPEN
 
 ### HD-E2 — Regulatory counsel engagement
@@ -44,7 +44,7 @@ Each item: what is needed, options, recommendation, and what it blocks. Status i
 
 ### HD-E6 — BLOCKED-TEST-CONFLICT items
 - **Blocks:** each affected finding.
-- **Status:** OPEN — 9 entries (A2-1, A5-1, A5-2, A8-1, F03-1, F04-1, F01-1, F01-2, F08-1).
+- **Status:** PARTLY ANSWERED 2026-11-19. Housam approved the recommended option for F01-1, F08-1, F01-2, F04-1, F03-1 and A8-1 (all CLOSED, see the register). A2-1, A5-1 and A5-2 remain OPEN (clinical; not part of that approval).
 
 #### F01-1 — HTTP authentication on /api/v1/ingest and /api/v1/vitals (Phase 2 gate item)
 - **Tests:** every existing test that calls these endpoints through the `client` fixture
@@ -202,14 +202,15 @@ finding is implemented.
   reviewer (e.g. round half up to the recorded precision).
 - **Status:** OPEN
 
-## Commercial
+### HD-E9 — FHIR output findings H-01..H-06
+- **Blocks:** H-01 (Bundle.note / Bundle.extension not valid R4), H-02 (Bundle.total on a
+  collection), H-03 (non-idempotent resource IDs), H-04 (invalid device URN), H-05 (Patient
+  id not checked against the FHIR id rule on the HL7 path), H-06 (SNOMED code reused as value).
+- **Why a decision:** existing tests lock in the current output, and H-01 moves the
+  advisory-only statement that the CDS design intent relies on. H-05 decides whether a
+  monitor message with an identifier outside the FHIR id rule is refused or mapped.
+- **Options:** (1) approve test amendments per item and a new location for the advisory
+  statement (e.g. a Provenance or an Observation note) — recommended; (2) keep as documented
+  known gaps.
+- **Status:** OPEN
 
-| ID | Decision | Recommendation | Status |
-|---|---|---|---|
-| HD-C1 | IP ownership document (Gate 1) | Obtain before any outreach | OPEN |
-| HD-C2 | Counsel consult (Gate 2) | Before any external regulatory statement | OPEN |
-| HD-C3 | Outreach identity: student address vs another | Assess credibility impact per segment; do not invent a domain | OPEN |
-| HD-C4 | Postal address for commercial email | No US cold email in the first 90 days (makes CAN-SPAM moot); never publish a home address | OPEN |
-| HD-C5 | Legal name for contracts ("Housam Abouelreish" vs "Housam Ashraf" in earlier docs) | Needed before any SOW is signed | OPEN |
-| HD-C6 | Pilot price approval before quoting anyone | Validate in interviews first | OPEN |
-| HD-C7 | Company formation timing | Only when a paying pilot is concrete | OPEN |
