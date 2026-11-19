@@ -51,6 +51,12 @@ from infrastructure.adapters.hl7v2_adapter import (
 )
 
 _ADAPTER = HL7v2Adapter()
+# A1 (2026-09): explicit ACVPU (Alert) and room-air OBX segments, appended by the
+# companion tests so the NEWS2 scoring path stays covered without defaults.
+_ACVPU_AND_O2_OBX = (
+    "OBX|7|ST|67775-7^Level of responsiveness^LN||A||||||F|||20240115100000\r"
+    "OBX|8|NM|57834-7^Supplemental O2^LN||0||||||F|||20240115100000\r"
+)
 _ORCHESTRATOR = VitalsOrchestrator()
 
 # ── Synthetic Waveform Construction ────────────────────────────────────────────
@@ -223,6 +229,27 @@ class TestWaveformNeverFeedsNews2Score:
             context=PatientContext(patient_id="PT-WAVE-001"),
         )
 
+        # Amended under the delegated A1 rule (2026-09): the message carries no
+        # ACVPU and no air/O2 OBX, so NEWS2 is INCOMPLETE rather than scored
+        # with assumed Alert / room air. The waveform placeholder must still
+        # never be treated as a scalar input (no CRITICAL / ARTIFACT finding).
+        assert analysis.news2_score is None
+        assert analysis.assessment.outcome.value == "incomplete"
+        assert "MISSING_CONSCIOUSNESS" in analysis.assessment.reason_codes
+        assert "MISSING_O2_STATUS" in analysis.assessment.reason_codes
+        assert "CRITICAL_VALUE_REVIEW_REQUIRED" not in analysis.assessment.reason_codes
+
+    def test_news2_score_reflects_only_scalar_values_with_all_seven_inputs(
+        self,
+    ) -> None:
+        """Companion to the amended test above: scoring path still covered."""
+        raw = _build_waveform_oru(_RAW_WAVEFORM, _FS) + _ACVPU_AND_O2_OBX
+        result = _ADAPTER.parse(raw)
+        analysis = _ORCHESTRATOR.analyse(
+            samples=result.samples,
+            context=PatientContext(patient_id="PT-WAVE-001"),
+        )
+
         assert analysis.news2_score is not None
         assert analysis.news2_score.total == 0
         assert analysis.news2_score.risk_level is NEWS2RiskLevel.NORMAL
@@ -248,6 +275,34 @@ class TestWaveformNeverFeedsNews2Score:
             f"OBX|5|NM|8480-6^Systolic BP^LN||118|mmHg||||F|||{ts}\r"
             f"OBX|6|NM|8310-5^Temperature^LN||36.8|Cel||||F|||{ts}\r"
         )
+        result = _ADAPTER.parse(raw)
+        analysis = _ORCHESTRATOR.analyse(
+            samples=result.samples,
+            context=PatientContext(patient_id="PT-WAVE-002"),
+        )
+        # Amended under the delegated A1 rule (2026-09): no ACVPU and no air/O2
+        # OBX in this message, so NEWS2 is INCOMPLETE, not scored with defaults.
+        assert analysis.news2_score is None
+        assert analysis.assessment.outcome.value == "incomplete"
+        assert "MISSING_CONSCIOUSNESS" in analysis.assessment.reason_codes
+        assert "MISSING_O2_STATUS" in analysis.assessment.reason_codes
+
+    def test_abnormal_scalar_hr_scores_alongside_waveform_with_all_seven_inputs(
+        self,
+    ) -> None:
+        """Companion to the amended test above: scoring path still covered."""
+        ts = "20240115100000"
+        raw = (
+            f"MSH|^~\\&|DRAEGER|ICU-BED-12|EHR|HOSPITAL|{ts}||ORU^R01|MSGWAVE02|P|2.5.1\r"
+            "PID|1||PT-WAVE-002\r"
+            f"OBX|1|NA|8867-4^ECG Waveform^LN||{_waveform_field(_RAW_WAVEFORM)}"
+            f"|{_FS:g}||||F|||{ts}\r"
+            f"OBX|2|NM|8867-4^Heart rate^LN||135|/min||||F|||{ts}\r"
+            f"OBX|3|NM|9279-1^Respiratory rate^LN||16|/min||||F|||{ts}\r"
+            f"OBX|4|NM|59408-5^SpO2^LN||98|%||||F|||{ts}\r"
+            f"OBX|5|NM|8480-6^Systolic BP^LN||118|mmHg||||F|||{ts}\r"
+            f"OBX|6|NM|8310-5^Temperature^LN||36.8|Cel||||F|||{ts}\r"
+        ) + _ACVPU_AND_O2_OBX
         result = _ADAPTER.parse(raw)
         analysis = _ORCHESTRATOR.analyse(
             samples=result.samples,
