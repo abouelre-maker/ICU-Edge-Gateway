@@ -250,15 +250,36 @@ jobs:
           curl -s -m 3 http://127.0.0.1/ >/dev/null 2>&1 \
             && { echo "::error::port 80 is listening"; exit 1; } || echo "no port 80 listener"
 
-          # TLS 1.2: a missing client certificate fails the handshake itself,
-          # so openssl's exit status is the verdict.
-          if timeout 5 openssl s_client -tls1_2 -connect 127.0.0.1:2576 </dev/null >/dev/null 2>&1; then
-            echo "::error::MLLP accepted a client without a certificate"; exit 1
+          # nginx's stream module completes the TLS handshake and then closes a
+          # connection without a valid client certificate before proxying any
+          # byte. So the verdict is what reaches the upstream: a recorder on
+          # 127.0.0.1:2575 stands in for the gateway's MLLP port.
+          python3 -c "
+          import socket
+          s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+          s.bind(('127.0.0.1', 2575)); s.listen()
+          while True:
+              c, _ = s.accept(); c.settimeout(3)
+              try:
+                  data = c.recv(4096)
+              except OSError:
+                  data = b''
+              open('mllp_received.txt', 'ab').write(data); c.close()
+          " > /dev/null 2>&1 &
+          REC=$!
+          trap 'kill $STUB $REC 2>/dev/null; docker rm -f proxy >/dev/null 2>&1' EXIT
+          sleep 1
+          : > mllp_received.txt
+          printf 'NO_CERT_MSG' | timeout 5 openssl s_client -tls1_2 -quiet -connect 127.0.0.1:2576 >/dev/null 2>&1 || true
+          sleep 1
+          if grep -q NO_CERT_MSG mllp_received.txt; then
+            echo "::error::MLLP data without a client certificate reached the gateway"; exit 1
           fi
-          echo "MLLP without client certificate refused"
+          echo "MLLP without client certificate: nothing reached the gateway"
           # Positive control: a certificate trusted by the monitor CA gets through.
-          if ! timeout 5 openssl s_client -tls1_2 -connect 127.0.0.1:2576 \
-               -cert tls/gateway.crt -key tls/gateway.key </dev/null >/dev/null 2>&1; then
-            echo "::error::MLLP refused a client with a valid certificate"; exit 1
-          fi
-          echo "MLLP with a valid client certificate accepted"
+          printf 'WITH_CERT_MSG' | timeout 5 openssl s_client -tls1_2 -quiet -connect 127.0.0.1:2576 \
+            -cert tls/gateway.crt -key tls/gateway.key >/dev/null 2>&1 || true
+          sleep 1
+          grep -q WITH_CERT_MSG mllp_received.txt \
+            || { echo "::error::MLLP data with a valid certificate did not reach the gateway"; exit 1; }
+          echo "MLLP with a valid client certificate: data delivered"
