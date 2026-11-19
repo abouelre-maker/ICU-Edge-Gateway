@@ -61,7 +61,7 @@ _log: structlog.BoundLogger = structlog.get_logger(__name__)
 _LOINC_TO_TYPE: Final[dict[str, VitalSignType]] = {
     "8867-4": VitalSignType.HEART_RATE,  # Heart rate
     "59408-5": VitalSignType.SPO2,  # SpO2 by pulse ox
-    "2708-6": VitalSignType.SPO2,  # Oxygen saturation (alternate)
+    # A5: 2708-6 (arterial-blood saturation, SaO2) removed — it is not SpO2.
     "9279-1": VitalSignType.RESPIRATORY_RATE,  # Respiratory rate
     "8480-6": VitalSignType.SYSTOLIC_BP,  # Systolic BP
     "8462-4": VitalSignType.DIASTOLIC_BP,  # Diastolic BP
@@ -84,9 +84,7 @@ _VENDOR_TO_TYPE: Final[dict[str, VitalSignType]] = {
     "PR": VitalSignType.HEART_RATE,  # Pulse Rate (GE)
     # SpO2
     "SPO2": VitalSignType.SPO2,
-    "SO2": VitalSignType.SPO2,
-    "SAO2": VitalSignType.SPO2,
-    "STO2": VitalSignType.SPO2,
+    # A5: SO2 / SAO2 (arterial) / STO2 (tissue) removed — not pulse oximetry.
     "SPO2-%": VitalSignType.SPO2,
     # Respiratory Rate
     "RESP": VitalSignType.RESPIRATORY_RATE,
@@ -98,18 +96,19 @@ _VENDOR_TO_TYPE: Final[dict[str, VitalSignType]] = {
     "NBP-S": VitalSignType.SYSTOLIC_BP,
     "NBP_S": VitalSignType.SYSTOLIC_BP,
     "SBP": VitalSignType.SYSTOLIC_BP,
-    "ABP-S": VitalSignType.SYSTOLIC_BP,
-    "ART-S": VitalSignType.SYSTOLIC_BP,
+    # A5: ABP-S / ART-S (arterial) removed — they collided with NIBP.
     # Diastolic BP
     "NIBP-D": VitalSignType.DIASTOLIC_BP,
     "NIBP_D": VitalSignType.DIASTOLIC_BP,
     "NBP-D": VitalSignType.DIASTOLIC_BP,
     "NBP_D": VitalSignType.DIASTOLIC_BP,
     "DBP": VitalSignType.DIASTOLIC_BP,
-    "ABP-D": VitalSignType.DIASTOLIC_BP,
-    "ART-D": VitalSignType.DIASTOLIC_BP,
+    # A5: ABP-D / ART-D (arterial) removed — they collided with NIBP.
     # Temperature
     "TEMP": VitalSignType.TEMPERATURE_CELSIUS,
+    # A5 (BLOCKED-TEST-CONFLICT A5-1, HD-E6): T1 / T2 are site-unspecified and
+    # may be skin temperature, but tests/unit/test_demo_streamer.py locks in the
+    # demo's "T1^...^DRAEGER" mapping. Kept until Housam decides.
     "T1": VitalSignType.TEMPERATURE_CELSIUS,
     "T2": VitalSignType.TEMPERATURE_CELSIUS,
     "TEMPBLA": VitalSignType.TEMPERATURE_CELSIUS,  # Bladder temp (Philips)
@@ -498,7 +497,7 @@ class HL7v2Adapter:
         # Resolved before the value-type branch below so waveform handling can
         # consult the per-type sampling-rate default table.
         obx_3_str = _safe_field(obx, "obx_3")
-        vital_type = self._resolve_vital_type(obx_3_str, vendor, warnings)
+        vital_type = self._resolve_vital_type(obx_3_str, vendor, warnings, findings)
         if vital_type is None:
             return None
 
@@ -613,14 +612,17 @@ class HL7v2Adapter:
         obx_3: str,
         vendor: MonitorVendor,
         warnings: list[str],
+        findings: list[Finding] | None = None,
     ) -> VitalSignType | None:
         """
-        Map OBX-3 identifier to VitalSignType.
+        Map OBX-3 identifier to VitalSignType, honouring the coding system (A5).
 
-        Resolution order:
-          1. LOINC code (OBX-3.3 coding system = "LN" or "LOINC")
-          2. Vendor proprietary code (normalized to uppercase)
-          3. LOINC lookup of OBX-3.1 regardless of system (best-effort)
+        Resolution:
+          - OBX-3.3 = "LN"/"LOINC": LOINC table only.
+          - OBX-3.3 absent: LOINC table, then the proprietary-code table.
+          - Any other system: proprietary-code table, then — INTERIM, pending
+            BLOCKED-TEST-CONFLICT A5-2 (HD-E6) — a best-effort LOINC lookup,
+            which tests/integration/test_hl7v2_vendor_edge_cases.py locks in.
 
         ISO 14971 HAZARD-PROTO-001: Unmapped codes return None (OBX skipped)
         rather than raising — prevents one unknown code crashing the message.
@@ -629,19 +631,23 @@ class HL7v2Adapter:
         identifier = parts[0].strip()
         coding_system = parts[2].strip().upper() if len(parts) > 2 else ""
 
-        # 1. LOINC lookup
-        if coding_system in {"LN", "LOINC", ""} and identifier in _LOINC_TO_TYPE:
+        is_loinc = coding_system in {"LN", "LOINC"}
+        if (is_loinc or not coding_system) and identifier in _LOINC_TO_TYPE:
+            return _LOINC_TO_TYPE[identifier]
+        if not is_loinc and identifier.upper() in _VENDOR_TO_TYPE:
+            return _VENDOR_TO_TYPE[identifier.upper()]
+        if not is_loinc and identifier in _LOINC_TO_TYPE:  # interim, A5-2
             return _LOINC_TO_TYPE[identifier]
 
-        # 2. Vendor proprietary code (non-LOINC)
-        normalized = identifier.upper().replace("-", "-")
-        if normalized in _VENDOR_TO_TYPE:
-            return _VENDOR_TO_TYPE[normalized]
-
-        # 3. Best-effort LOINC without coding system assertion
-        if identifier in _LOINC_TO_TYPE:
-            return _LOINC_TO_TYPE[identifier]
-
+        if findings is not None:
+            findings.append(
+                Finding(
+                    ReasonCode.UNRECOGNISED_CODE,
+                    None,
+                    f"OBX-3 code '{identifier}' (system '{coding_system or 'none'}') "
+                    "is not mapped; segment skipped.",
+                )
+            )
         warnings.append(
             f"[OBX-UNKNOWN] Cannot map OBX-3 '{obx_3}' to a VitalSignType "
             f"(vendor={vendor.value}). Segment skipped. "

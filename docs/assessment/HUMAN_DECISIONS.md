@@ -44,7 +44,37 @@ Each item: what is needed, options, recommendation, and what it blocks. Status i
 
 ### HD-E6 — BLOCKED-TEST-CONFLICT items
 - **Blocks:** each affected finding.
-- **Status:** OPEN — 1 entry.
+- **Status:** OPEN — 3 entries (A2-1, A5-1, A5-2).
+
+#### A5-1 — site-unspecified `T1`/`T2` mapped to core temperature
+- **Tests (5):** `tests/unit/test_demo_streamer.py::TestEveryEmittedObxCodeIsAlreadyMapped::test_no_obx_is_skipped_for_any_stage_of_any_bed[ICU-BED-03]`,
+  `...::test_all_seven_news2_parameters_are_present[ICU-BED-03]`,
+  `tests/unit/test_demo_streamer.py::TestSepsisRampTrajectory::{test_trajectory_is_monotonically_non_decreasing,test_trajectory_visits_normal_low_medium_and_high,test_trajectory_starts_normal_and_ends_high}`.
+- **Assertion locked in:** every OBX the demo emits for ICU-BED-03 is mapped, including
+  `T1^Temperature Channel 1^DRAEGER` (`scripts/demo_inject.py:280`), and the scripted
+  sepsis ramp scores from it.
+- **Behaviour it locks in:** the generic channel label `T1` is treated as core body temperature.
+- **Why that is wrong:** `T1`/`T2` do not say which body site they measure; a skin probe
+  reading feeds the NEWS2 temperature row as if it were core temperature (A5).
+- **Options:** (1) amend the demo to emit a site-specific code (e.g. `TEMPCORE` or LOINC 8310-5)
+  and keep `T1`/`T2` unmapped — **recommended**; the tests would then pass unchanged;
+  (2) keep the `T1`/`T2` mapping, WONTFIX.
+- **State now:** mapping kept; desired behaviour recorded as strict-xfail
+  `tests/unit/test_a5_code_mapping.py::test_site_unspecified_temperature_is_not_core`.
+
+#### A5-2 — LOINC-looking identifier under a non-LOINC coding system still resolves as LOINC
+- **Tests (2):** `tests/integration/test_hl7v2_vendor_edge_cases.py::TestLoincCodeMislabelledCodingSystemStillResolves::{test_loinc_code_with_non_loinc_coding_system_still_resolves,test_loinc_code_with_non_loinc_coding_system_on_generic_vendor}`.
+- **Assertions locked in:** `skipped_obx_count == 0`, one sample, `vital_sign_type is HEART_RATE` / `SPO2`
+  for a LOINC-shaped identifier declared under a non-LOINC system.
+- **Behaviour it locks in:** the declared coding system is ignored when the identifier happens
+  to match a LOINC code.
+- **Why that is wrong:** in a local code system the same string can mean something else;
+  honouring OBX-3.3 is the A5 requirement. (The opposite direction — `HR^...^LN` no longer
+  falls back to the proprietary table — is implemented and did not conflict.)
+- **Options:** (1) amend the two tests to expect `UNRECOGNISED_CODE` — **recommended**;
+  (2) keep the best-effort fallback, WONTFIX.
+- **State now:** fallback kept (marked interim in code); desired behaviour recorded as
+  strict-xfail `tests/unit/test_a5_code_mapping.py::test_non_loinc_system_does_not_fall_back_to_loinc_table`.
 
 #### A2-1 — `tests/integration/test_hl7v2_vendor_edge_cases.py::TestMalformedOrTruncatedMsh3::test_msh_with_only_the_required_leading_fields_does_not_crash`
 - **Assertion:** `assert len(result.samples) == 1` for a message with MSH-7 absent and
