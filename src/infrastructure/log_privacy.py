@@ -1,5 +1,5 @@
 """
-F-12: patient identifiers never reach the logs in clear.
+F-12 / REQ-SEC-002: patient identifiers never reach the logs in clear.
 
 A structlog processor replaces the value of identifier-bearing keys with a
 keyed pseudonym (HMAC-SHA256, 12 hex chars). The same patient gets the same

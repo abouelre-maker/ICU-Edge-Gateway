@@ -87,7 +87,7 @@ _DEAD_LETTER_CAPACITY = 1000  # F-04: bounded; oldest dropped first
 # LiveDashboardChannel can reuse the same logic instead of duplicating it.
 _extract_patient_id = extract_patient_id
 
-# F-04: an MQTT topic is metadata: brokers log it, ACLs and wildcard
+# F-04 / REQ-SEC-002: an MQTT topic is metadata: brokers log it, ACLs and wildcard
 # subscribers see it, payload encryption does not cover it. The topic carries
 # an opaque per-patient segment, HMAC-SHA256(MQTT_TOPIC_KEY, patient id)
 # truncated to 128 bits, never the identifier itself. Consumers demultiplex on

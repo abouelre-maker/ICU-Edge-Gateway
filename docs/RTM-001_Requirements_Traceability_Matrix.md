@@ -36,7 +36,7 @@ count and coverage numbers below are counted from this file's own table, not ass
 
 | Column | Populated from |
 |---|---|
-| Requirement | SRS-001 §3 — every `REQ-*` ID found in `src/` (17 total, confirmed by re-running the same `grep -rno "REQ-[A-Z0-9-]*" src/` in this revision that seeded SRS-001) |
+| Requirement | SRS-001 §3 — every `REQ-*` ID found in `src/` (17 at first compilation; 20 since the 2026-11-19 revision added REQ-API-011, REQ-SEC-001 and REQ-SEC-002; confirmed by re-running the same `grep -rno "REQ-[A-Z0-9-]*" src/` in this revision that seeded SRS-001) |
 | Design Artifact | Re-derived directly from source in this compilation — the class/function at the cited file:line |
 | Hazard Link | RMF-001 §3/Appendix A — cross-checked that the cited `HAZARD-*` ID exists in RMF-001's register (40 entries as of 2026-08-10's correction pass — see §6.1) |
 | Test | Re-verified in this revision: the cited file exists, and the cited class/function name exists in it (see §4) |
@@ -143,7 +143,7 @@ QMS-001/SRS-001 going forward (see RMF-001 §9's identical open question about H
 | REQ-SEC-001 | `require_api_key`, `authorize_websocket` — `src/api/auth.py`; router dependencies and lifespan check — `src/main.py`; MLLP bind/allow-list — `src/config.py` | HAZARD-SEC-001 | `tests/integration/test_f01_f08_auth_wired.py`; `tests/unit/test_f01_f08_auth.py`; `tests/unit/test_config.py::TestGetMllpHost` |
 | REQ-SEC-002 | `opaque_topic_segment` — `mqtt_publisher.py`; `pseudonymize_identifiers` — `src/infrastructure/log_privacy.py` | HAZARD-SEC-002 | `tests/unit/test_f04_opaque_topic.py`; `tests/integration/test_f12_f13_privacy.py` |
 
-**§3 row count: 17** (one per `REQ-*` ID; matches SRS-001 §3's 17-requirement count exactly).
+**§3 row count: 20** (one per `REQ-*` ID; matches SRS-001 §3's 20-requirement count and the 20 unique IDs found in `src/` on 2026-11-19).
 
 ## 4. Test Citation Verification Log
 
@@ -164,9 +164,9 @@ Every class/function name cited in §3's Test column was checked to exist, in th
 | `TestVitalsValidationErrors` | `tests/integration/test_api_vitals.py` | 446 |
 | `TestReqApi002NoLeakOnUnhandledException` (new) | `tests/integration/test_main_exception_handler.py` | 54 |
 
-All 17 `src/` `REQ-*` tag locations were independently re-confirmed by `grep -rno
-"REQ-[A-Z0-9-]*" src/` in this revision (17 unique IDs, matching SRS-001's count exactly — no drift
-between SRS-001's compilation and this one).
+All `src/` `REQ-*` tag locations were independently re-confirmed by `grep -rno
+"REQ-[A-Z0-9-]*" src/` (17 unique IDs at first compilation; re-run 2026-11-19: 20 unique IDs,
+matching SRS-001's count — the three new IDs are tagged at their implementation points).
 
 ## 5. Item 2 — REQ-API-002 No-Leak Test (added in this revision, not documentation-only)
 

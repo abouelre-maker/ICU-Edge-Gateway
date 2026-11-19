@@ -1,5 +1,5 @@
 """
-API-key authentication for HTTP routes and the live WebSocket (F-01, F-08).
+API-key authentication for HTTP routes and the live WebSocket (F-01, F-08; REQ-SEC-001).
 
 STATUS: wired (2026-11-19, HD-E6 option 1). create_app() adds
 `require_api_key` to /api/v1/ingest and /api/v1/vitals, the lifespan calls

@@ -256,7 +256,7 @@ def create_app() -> FastAPI:
         exc: RequestValidationError,
     ) -> JSONResponse:
         """
-        F-12: FastAPI's default 422 echoes each offending value ("input") back
+        REQ-API-011 / F-12: FastAPI's default 422 echoes each offending value ("input") back
         to the caller -- for this API that is often a patient identifier or a
         clinical value. Keep only where and why validation failed.
         """
