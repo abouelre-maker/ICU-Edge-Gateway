@@ -1,11 +1,16 @@
 # =============================================================================
-# Release image: build, push to GHCR, attach SBOM, sign (S-06)
+# Release image: build, sign, attest SBOM, THEN publish tags (S-06)
 #
-# Runs on pushes to main and on v* tags. Keyless Sigstore signing: the
-# signature is bound to this workflow's GitHub OIDC identity, so no signing
-# key exists to leak. Verify with:
-#   cosign verify ghcr.io/abouelre-maker/icu-edge-gateway:main \
-#     --certificate-identity-regexp 'https://github.com/abouelre-maker/ICU-Edge-Gateway/' \
+# Runs only on pushes to main and on v* tags (no manual dispatch, so an
+# unreviewed branch can never be published). The image is first pushed under
+# an immutable sha-<commit> tag, signed and SBOM-attested with keyless cosign,
+# and verified against THIS workflow's identity; only then do the moving tags
+# (main / vX.Y.Z) point at it. A failed signing step therefore never leaves a
+# moving tag on an unsigned image.
+#
+# Verify (pin the digest you will run):
+#   cosign verify ghcr.io/abouelre-maker/icu-edge-gateway@sha256:<digest> \
+#     --certificate-identity-regexp '^https://github.com/abouelre-maker/ICU-Edge-Gateway/\.github/workflows/release-image\.yml@refs/(heads/main|tags/v.+)$' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 # =============================================================================
 name: Release image
@@ -14,14 +19,20 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
+# One publication per ref at a time, in commit order: a newer push waits for
+# the running one, and an older queued run is superseded by the newer one, so
+# an older build can never move the tag after a newer one.
+concurrency:
+  group: release-image-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
-    name: Build, push, SBOM and sign
+    name: Build, sign, attest and publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,6 +40,7 @@ jobs:
       id-token: write   # keyless cosign signing
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/icu-edge-gateway
+      IDENTITY: ^https://github.com/${{ github.repository }}/\.github/workflows/release-image\.yml@refs/(heads/main|tags/v.+)$
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -43,20 +55,14 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute tags
-        id: tags
-        run: |
-          ref="${GITHUB_REF_NAME//\//-}"
-          echo "list=${IMAGE}:${ref},${IMAGE}:sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push
+      - name: Build and push (immutable tag only)
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: runtime
           push: true
-          tags: ${{ steps.tags.outputs.list }}
+          tags: ${{ env.IMAGE }}:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -81,12 +87,27 @@ jobs:
           cosign sign --yes "$REF"
           cosign attest --yes --type cyclonedx --predicate sbom.cdx.json "$REF"
 
-      - name: Verify signature
+      - name: Verify signature against this workflow's exact identity
         env:
           REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
         run: |
           cosign verify "$REF" \
-            --certificate-identity-regexp "https://github.com/${{ github.repository }}/" \
+            --certificate-identity-regexp "$IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             > /dev/null
-          echo "Signed and verified: $REF"
+          cosign verify-attestation "$REF" --type cyclonedx \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            > /dev/null
+
+      - name: Publish moving tag (only after signing succeeded)
+        env:
+          REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+        run: |
+          tag="${GITHUB_REF_NAME//\//-}"
+          docker buildx imagetools create --tag "${IMAGE}:${tag}" "$REF"
+          {
+            echo "### Published"
+            echo "- Image: \`${IMAGE}:${tag}\`"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\` (pin this)"
+          } >> "$GITHUB_STEP_SUMMARY"
