@@ -185,6 +185,7 @@ async def ingest_hl7(
     analysis_result = _orchestrator.analyse(
         samples=list(parse_result.samples),
         context=patient_context,
+        upstream_findings=parse_result.findings,
     )
 
     # ── Stage 4: FHIR Bundle Assembly ─────────────────────────────────────────

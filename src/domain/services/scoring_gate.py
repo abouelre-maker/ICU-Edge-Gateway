@@ -116,6 +116,29 @@ class ScoringGate:
                     )
                 )
 
+        # A1: consciousness and O2 status are mandatory NEWS2 inputs. Their
+        # absence must never default to Alert / room air (a false NORMAL).
+        if not any(
+            pv.original.vital_sign_type is VitalSignType.CONSCIOUSNESS
+            and pv.original.avpu_level is not None
+            for pv in inputs
+        ):
+            findings.append(
+                Finding(
+                    ReasonCode.MISSING_CONSCIOUSNESS,
+                    VitalSignType.CONSCIOUSNESS,
+                    "No level-of-consciousness (ACVPU) observation; not assumed Alert.",
+                )
+            )
+        if VitalSignType.SUPPLEMENTAL_O2 not in admitted:
+            findings.append(
+                Finding(
+                    ReasonCode.MISSING_O2_STATUS,
+                    VitalSignType.SUPPLEMENTAL_O2,
+                    "No air/supplemental-oxygen observation; not assumed room air.",
+                )
+            )
+
         used = [
             pv.original.timestamp
             for pv in inputs

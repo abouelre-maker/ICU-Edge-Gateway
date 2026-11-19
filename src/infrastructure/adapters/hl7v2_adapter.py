@@ -41,6 +41,7 @@ from typing import Final
 
 import structlog
 from domain.entities.device_context import DeviceContext, MonitorVendor
+from domain.entities.score_outcome import Finding, ReasonCode
 from domain.entities.vital_sign import (
     AVPULevel,
     VitalSignSample,
@@ -215,6 +216,7 @@ class HL7ParseResult:
         message_timestamp:  MSH-7 timestamp (UTC); now() if absent.
         skipped_obx_count:  OBX segments skipped due to unknown type or error.
         parse_warnings:     Ordered audit log from parsing.
+        findings:           Machine-readable reason codes (Phase 1 contract).
     """
 
     samples: tuple[VitalSignSample, ...]
@@ -223,6 +225,7 @@ class HL7ParseResult:
     message_timestamp: datetime
     skipped_obx_count: int
     parse_warnings: tuple[str, ...]
+    findings: tuple[Finding, ...] = ()
 
 
 # ── Adapter Implementation ─────────────────────────────────────────────────────
@@ -273,6 +276,7 @@ class HL7v2Adapter:
             ) from exc
 
         warnings: list[str] = []
+        findings: list[Finding] = []
 
         # ── Message-Level Metadata ─────────────────────────────────────────────
         msg_ts = self._extract_message_timestamp(msg)
@@ -304,6 +308,7 @@ class HL7v2Adapter:
                     patient_id=patient_id,
                     msg_timestamp=msg_ts,
                     warnings=warnings,
+                    findings=findings,
                 )
                 if sample is not None:
                     samples.append(sample)
@@ -328,6 +333,7 @@ class HL7v2Adapter:
             message_timestamp=msg_ts,
             skipped_obx_count=skipped,
             parse_warnings=tuple(warnings),
+            findings=tuple(findings),
         )
 
     # ── Private: Message-Level Extraction ─────────────────────────────────────
@@ -390,6 +396,7 @@ class HL7v2Adapter:
         patient_id: str,  # noqa: ARG002  # reserved for future subject reference
         msg_timestamp: datetime,
         warnings: list[str],
+        findings: list[Finding] | None = None,
     ) -> VitalSignSample | None:
         """
         Parse a single OBX segment into a VitalSignSample.
@@ -455,11 +462,18 @@ class HL7v2Adapter:
         # Parse value based on VitalSignType
         if vital_type is VitalSignType.CONSCIOUSNESS:
             return self._build_consciousness_sample(
-                raw_value, obs_timestamp, device_id, warnings
+                raw_value, obs_timestamp, device_id, warnings, findings
             )
 
         if vital_type is VitalSignType.SUPPLEMENTAL_O2:
-            return self._build_o2_sample(raw_value, obs_timestamp, device_id, warnings)
+            return self._build_o2_sample(
+                raw_value,
+                obs_timestamp,
+                device_id,
+                warnings,
+                unit_str=_safe_field(obx, "obx_6"),
+                findings=findings,
+            )
 
         # All other types: numeric value
         numeric = _parse_numeric(raw_value)
@@ -712,15 +726,33 @@ class HL7v2Adapter:
         timestamp: datetime,
         device_id: str,
         warnings: list[str],
+        findings: list[Finding] | None = None,
     ) -> VitalSignSample | None:
-        """Parse AVPU string (ST type OBX) into VitalSignSample with avpu_level."""
-        key = raw_value.strip().upper()
-        avpu = _AVPU_STRINGS.get(key)
+        """
+        Parse an AVPU value into VitalSignSample with avpu_level.
+
+        Accepts a plain ST value ("V", "Voice") or a CWE-coded value
+        ("V^Voice^L"): the identifier component is tried first, then the text
+        component. An unmapped value (e.g. "Drowsy") is skipped AND reported as
+        UNMAPPED_AVPU — it is never assumed Alert (A1).
+        """
+        components = [c.strip().upper() for c in raw_value.split("^")]
+        avpu = next(
+            (_AVPU_STRINGS[c] for c in components[:2] if c in _AVPU_STRINGS), None
+        )
         if avpu is None:
             warnings.append(
                 f"[OBX-AVPU] Cannot map OBX-5 value '{raw_value}' to AVPULevel. "
                 f"Recognised values: {sorted(_AVPU_STRINGS.keys())}. Segment skipped."
             )
+            if findings is not None:
+                findings.append(
+                    Finding(
+                        ReasonCode.UNMAPPED_AVPU,
+                        VitalSignType.CONSCIOUSNESS,
+                        "Consciousness value could not be mapped to ACVPU.",
+                    )
+                )
             return None
         return VitalSignSample(
             vital_sign_type=VitalSignType.CONSCIOUSNESS,
@@ -737,14 +769,59 @@ class HL7v2Adapter:
         timestamp: datetime,
         device_id: str,
         warnings: list[str],
+        unit_str: str = "",
+        findings: list[Finding] | None = None,
     ) -> VitalSignSample | None:
         """
         Parse supplemental O2 OBX into VitalSignSample (boolean encoding).
 
         Encoding: 1.0 = on supplemental oxygen, 0.0 = on room air.
-        Handles: "1"/"0", "YES"/"NO", "O2"/"AIR", FiO2 % values > 21%.
+        Handles (A1):
+          - "1"/"0", "YES"/"NO", "O2"/"AIR" (boolean text);
+          - flow with an L/min unit: any flow > 0 is supplemental O2;
+          - FiO2 as a percentage (unit "%" or value >= 21): > 21 % is O2;
+          - FiO2 as a fraction (0 < value <= 1 with a decimal point): > 0.21 is O2.
+        A unitless number between 1 and 21 could be a flow or a percentage and
+        is rejected as AMBIGUOUS_UNIT — never read as room air.
         """
         v = raw_value.strip().upper()
+        unit = unit_str.split("^")[0].strip().lower()
+
+        def _o2(on_o2: bool) -> VitalSignSample:
+            return VitalSignSample(
+                vital_sign_type=VitalSignType.SUPPLEMENTAL_O2,
+                value=1.0 if on_o2 else 0.0,
+                unit=VitalSignUnit.BOOLEAN,
+                timestamp=timestamp,
+                device_id=device_id,
+            )
+
+        def _ambiguous(reason: str) -> None:
+            warnings.append(f"[OBX-O2] {reason} Value '{raw_value}' skipped.")
+            if findings is not None:
+                findings.append(
+                    Finding(
+                        ReasonCode.AMBIGUOUS_UNIT,
+                        VitalSignType.SUPPLEMENTAL_O2,
+                        reason,
+                    )
+                )
+
+        if unit in {"l/min", "lpm", "l/mn"}:
+            flow = _parse_numeric(v)
+            if flow is None:
+                _ambiguous("Oxygen flow is not a number.")
+                return None
+            return _o2(flow > 0.0)
+        if unit == "%":
+            pct = _parse_numeric(v)
+            if pct is None:
+                _ambiguous("FiO2 percentage is not a number.")
+                return None
+            return _o2(pct > 21.0)
+        if unit not in {"", "bool", "{ratio}", "1"}:
+            _ambiguous(f"Unrecognised oxygen unit '{unit}'.")
+            return None
 
         # Boolean / string representations
         if v in {"1", "YES", "TRUE", "O2", "OXYGEN", "ON O2"}:
@@ -764,17 +841,16 @@ class HL7v2Adapter:
                 device_id=device_id,
             )
 
-        # FiO2 percentage: > 21% = on supplemental O2
         numeric = _parse_numeric(v)
         if numeric is not None:
-            on_o2 = numeric > 21.0  # Room air FiO2 = 21%
-            return VitalSignSample(
-                vital_sign_type=VitalSignType.SUPPLEMENTAL_O2,
-                value=1.0 if on_o2 else 0.0,
-                unit=VitalSignUnit.BOOLEAN,
-                timestamp=timestamp,
-                device_id=device_id,
+            if "." in v and 0.0 < numeric <= 1.0:
+                return _o2(numeric > 0.21)  # FiO2 fraction; room air = 0.21
+            if numeric >= 21.0:
+                return _o2(numeric > 21.0)  # FiO2 percent; room air = 21 %
+            _ambiguous(
+                "Unitless oxygen value could be a flow (L/min) or a percentage."
             )
+            return None
 
         warnings.append(
             f"[OBX-O2] Cannot parse supplemental O2 value '{raw_value}'. Skipped."

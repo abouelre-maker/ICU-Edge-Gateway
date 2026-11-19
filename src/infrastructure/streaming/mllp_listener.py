@@ -274,6 +274,7 @@ class MLLPListener:
         analysis_result = self._orchestrator.analyse(
             samples=list(parse_result.samples),
             context=patient_context,
+            upstream_findings=parse_result.findings,
         )
         bundle = self._assembler.assemble(
             result=analysis_result,
