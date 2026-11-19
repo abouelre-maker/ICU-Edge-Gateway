@@ -2,11 +2,14 @@
 # Release image: build, sign, attest SBOM, THEN publish tags (S-06)
 #
 # Runs only on pushes to main and on v* tags (no manual dispatch, so an
-# unreviewed branch can never be published). The image is first pushed under
-# an immutable sha-<commit> tag, signed and SBOM-attested with keyless cosign,
-# and verified against THIS workflow's identity; only then do the moving tags
-# (main / vX.Y.Z) point at it. A failed signing step therefore never leaves a
-# moving tag on an unsigned image.
+# unreviewed branch can never be published). The image is first pushed under a
+# temporary per-run tag, signed and SBOM-attested with keyless cosign, and
+# verified against THIS workflow's identity; only then are sha-<commit> and the
+# moving tag (main / vX.Y.Z) pointed at that exact signed digest, and only if
+# the commit is still the head of its ref. A failed signing step therefore
+# never leaves a deployable tag on an unsigned image.
+# Release tags (v*) should be restricted to maintainers with a repository tag
+# ruleset; this repository has a single maintainer.
 #
 # Verify (pin the digest you will run):
 #   cosign verify ghcr.io/abouelre-maker/icu-edge-gateway@sha256:<digest> \
@@ -55,14 +58,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build and push (immutable tag only)
+      - name: Build and push (temporary per-run tag only)
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: runtime
           push: true
-          tags: ${{ env.IMAGE }}:sha-${{ github.sha }}
+          # A per-run tag nobody deploys from; the real tags are added only
+          # after signing and verification succeed (last step).
+          tags: ${{ env.IMAGE }}:build-${{ github.run_id }}-${{ github.run_attempt }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -100,12 +105,27 @@ jobs:
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             > /dev/null
 
-      - name: Publish moving tag (only after signing succeeded)
+      - name: Publish tags (only after signing succeeded, only if still the head)
         env:
           REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.build.outputs.digest }}
         run: |
+          # A delayed, queued or re-run job for an older commit must not move
+          # the tag back: publish only if this commit is still the ref's head.
+          head=$(git ls-remote origin "$GITHUB_REF" | cut -f1)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "::warning::$GITHUB_REF has moved to $head; not publishing tags for $GITHUB_SHA."
+            exit 0
+          fi
           tag="${GITHUB_REF_NAME//\//-}"
-          docker buildx imagetools create --tag "${IMAGE}:${tag}" "$REF"
+          # --prefer-index=false keeps the SIGNED manifest digest; without it a
+          # single-platform image would be wrapped in a new, unsigned index.
+          for t in "sha-${GITHUB_SHA}" "$tag"; do
+            docker buildx imagetools create --prefer-index=false --tag "${IMAGE}:${t}" "$REF"
+            got=$(docker buildx imagetools inspect "${IMAGE}:${t}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+            [ "$got" = "$DIGEST" ] || { echo "::error::${t} resolves to ${got}, signed digest is ${DIGEST}"; exit 1; }
+          done
+          cosign verify "${IMAGE}:${tag}"             --certificate-identity-regexp "$IDENTITY"             --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
           {
             echo "### Published"
             echo "- Image: \`${IMAGE}:${tag}\`"
