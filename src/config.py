@@ -372,6 +372,32 @@ def get_reattestation_interval_seconds() -> float:
     return interval
 
 
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer. Got {raw!r}.") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer. Got {value}.")
+    return value
+
+
+def get_max_request_body_bytes() -> int:
+    """MAX_REQUEST_BODY_BYTES (default 262144 = 256 KiB). F-02 DoS control."""
+    return _positive_int_env("MAX_REQUEST_BODY_BYTES", 262_144)
+
+
+def get_hl7_max_obx() -> int:
+    """HL7_MAX_OBX_PER_MESSAGE (default 200). F-02 DoS control."""
+    return _positive_int_env("HL7_MAX_OBX_PER_MESSAGE", 200)
+
+
+def get_max_waveform_samples() -> int:
+    """MAX_WAVEFORM_SAMPLES (default 20000 ≈ 80 s at 250 Hz). F-02 DoS control."""
+    return _positive_int_env("MAX_WAVEFORM_SAMPLES", 20_000)
+
+
 def validate_news2_scoring_config() -> None:
     """
     Fail-closed startup check (A2, decision Q1(b)): the NEWS2 module may only

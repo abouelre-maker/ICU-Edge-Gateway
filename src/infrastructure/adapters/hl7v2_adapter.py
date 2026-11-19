@@ -220,6 +220,10 @@ class HL7ParseResult:
 # ── Adapter Implementation ─────────────────────────────────────────────────────
 
 
+_DEFAULT_MAX_OBX: Final = 200  # F-02 DoS cap (engineering, configurable)
+_DEFAULT_MAX_WAVEFORM_SAMPLES: Final = 20_000
+
+
 class HL7v2Adapter:
     """
     Parses HL7 v2.x ORU^R01 messages from ICU monitors into VitalSignSample lists.
@@ -229,6 +233,14 @@ class HL7v2Adapter:
     Design guarantee: never raises on a single bad OBX segment — skips + warns.
     Only raises ValueError when the entire HL7 message is syntactically invalid.
     """
+
+    def __init__(
+        self,
+        max_obx: int = _DEFAULT_MAX_OBX,
+        max_waveform_samples: int = _DEFAULT_MAX_WAVEFORM_SAMPLES,
+    ) -> None:
+        self._max_obx = max_obx
+        self._max_waveform_samples = max_waveform_samples
 
     def parse(
         self,
@@ -264,6 +276,14 @@ class HL7v2Adapter:
             raise ValueError(
                 "Non-standard HL7 encoding characters (MSH-1/MSH-2) are not "
                 "supported; expected '|' and '^~\\&'."
+            )
+
+        # F-02: bound parser work before hl7apy sees the message.
+        obx_count = sum(1 for s in stripped.split("\r") if s.startswith("OBX|"))
+        if obx_count > self._max_obx:
+            raise ValueError(
+                f"Message has {obx_count} OBX segments; the limit is "
+                f"{self._max_obx} per message (F-02)."
             )
 
         try:
@@ -724,6 +744,12 @@ class HL7v2Adapter:
                 array_text = array_text.replace(",", "^")
 
         samples = _parse_numeric_array(array_text) if array_text is not None else None
+        if samples and len(samples) > self._max_waveform_samples:
+            warnings.append(
+                f"[OBX-WAVEFORM-TOO-LONG] {len(samples)} samples exceed the "
+                f"{self._max_waveform_samples}-sample limit (F-02). Segment skipped."
+            )
+            return None
         if not samples:
             warnings.append(
                 f"[OBX-WAVEFORM-UNPARSEABLE] Could not parse {value_type} "

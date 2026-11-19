@@ -210,7 +210,13 @@ class MLLPListener:
                 frame = await self._read_frame(reader, log)
                 if frame is None:
                     break  # clean EOF between messages
-                outcome = self._process_frame(frame, log)
+                # F-02: parsing / DSP / NEWS2 / FHIR assembly run in a worker
+                # thread; only the cheap publish step touches the event loop.
+                outcome = await asyncio.get_running_loop().run_in_executor(
+                    None, self._process_frame, frame, log
+                )
+                if outcome.accepted and outcome.bundle is not None:
+                    self._publish(outcome.bundle, log)
                 ack = self._build_ack(outcome)
                 writer.write(_START_BLOCK + ack.encode("utf-8") + _FRAME_TERMINATOR)
                 await writer.drain()
@@ -348,17 +354,6 @@ class MLLPListener:
             encounter_id=None,
         )
 
-        dropped = self._forward_buffer.push(bundle)
-        if dropped:
-            log.warning("mllp_listener.forward_buffer.overflow_drop")
-
-        if self._live_channel is not None:
-            # Fire-and-forget: never adds latency to the ACK/NAK response.
-            self._live_channel.schedule_broadcast(bundle, source="mllp")
-
-        if self._subscription_dispatcher is not None:
-            self._subscription_dispatcher.schedule_dispatch(bundle)
-
         log.info(
             "mllp_listener.frame.processed",
             patient_id=parse_result.patient_id,
@@ -378,6 +373,19 @@ class MLLPListener:
             ack_code="AA",
             control_id=control_id,
         )
+
+    def _publish(self, bundle: dict[str, Any], log: Any) -> None:
+        """Buffer + fan-out; runs on the event loop (schedules asyncio tasks)."""
+        dropped = self._forward_buffer.push(bundle)
+        if dropped:
+            log.warning("mllp_listener.forward_buffer.overflow_drop")
+
+        if self._live_channel is not None:
+            # Fire-and-forget: never adds latency to the ACK/NAK response.
+            self._live_channel.schedule_broadcast(bundle, source="mllp")
+
+        if self._subscription_dispatcher is not None:
+            self._subscription_dispatcher.schedule_dispatch(bundle)
 
     @staticmethod
     def _build_ack(outcome: MLLPIngestOutcome) -> str:

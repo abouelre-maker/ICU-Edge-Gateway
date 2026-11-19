@@ -15,6 +15,7 @@ from contextlib import asynccontextmanager, suppress
 
 import structlog
 import uvicorn
+from api.body_limit import BodySizeLimitMiddleware
 from api.v1.fhir_subscription import router as fhir_subscription_router
 from api.v1.health import router as health_router
 from api.v1.ingest import router as ingest_router
@@ -23,6 +24,9 @@ from api.v1.vitals import router as vitals_router
 from config import (
     get_cert_store_path,
     get_cors_allowed_origins,
+    get_hl7_max_obx,
+    get_max_request_body_bytes,
+    get_max_waveform_samples,
     get_mllp_enabled,
     get_mllp_host,
     get_mllp_port,
@@ -37,6 +41,7 @@ from config import (
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from infrastructure.adapters.hl7v2_adapter import HL7v2Adapter
 from infrastructure.provisioning.cert_store import CertStore
 from infrastructure.provisioning.reattestation import reattestation_loop
 from infrastructure.streaming.live_dashboard_channel import LiveDashboardChannel
@@ -115,6 +120,10 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
             forward_buffer=app.state.forward_buffer,
             live_channel=app.state.live_dashboard_channel,
             subscription_dispatcher=app.state.subscription_dispatcher,
+            adapter=HL7v2Adapter(
+                max_obx=get_hl7_max_obx(),
+                max_waveform_samples=get_max_waveform_samples(),
+            ),
         )
         await listener.start()
         app.state.mllp_listener = listener
@@ -222,6 +231,9 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type", "Accept", "X-Request-ID"],
     )
+
+    # F-02: reject oversized request bodies with 413 before buffering them.
+    app.add_middleware(BodySizeLimitMiddleware, max_bytes=get_max_request_body_bytes())
 
     # ── Global Exception Handlers ──────────────────────────────────────────────
 
