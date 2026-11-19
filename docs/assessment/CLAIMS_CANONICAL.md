@@ -1,0 +1,67 @@
+# Canonical Claims — Single Source of Truth
+
+**Status:** authoritative from 2026-09-30. **Supersedes `claude/verified_claims_sheet.md`**,
+which still contains now-disproven wording. Both engineering (Track E) and
+commercial (Track C) work use this file until Phase 7 reconciles the old sheet.
+
+Update the test counts below at the end of every Track E phase, with the date.
+
+## Latest verified test status
+
+| Date | Commit / branch | Result | Coverage | Lint / types | Interpreter |
+|---|---|---|---|---|---|
+| 2026-09-29 | `main` @ `83f3a7f` | 816 passed, 1 xfailed | 95% statements | ruff clean, mypy clean | Python 3.11.9 |
+| 2026-09-30 | `hardening/assessment-2026-09` (Step 1 start) | 816 passed, 1 xfailed | 95% | ruff clean, mypy clean | Python 3.11.9 |
+
+## TRUE — may be said
+
+- 816 automated tests pass, 1 expected failure, 95% statement coverage, lint and type
+  checks clean (verified 2026-09-29, Python 3.11.9). Always quote the latest row above
+  with its date.
+- NEWS2 threshold tables verified against RCP 2017, including SpO2 Scale 2.
+- Artifact rejection is designed to suppress a score rather than fake one.
+- Advisory-only design. Deterministic, traceable scoring logic.
+- A documented, maintained list of open risks and findings.
+- All inputs so far are **synthetic**.
+- The demo stack ran end to end on the owner's Windows machine on 2026-08-23 (a single
+  local observation, not a benchmark).
+
+## NOT TRUE — must never be claimed
+
+- clinically validated; tested on real monitors or real patient data
+- production-ready; certified, compliant, cleared, or approved by anyone
+- "IEC 62304 Class B" → say instead: **"developed with reference to IEC 62304 and
+  ISO 14971 practices; software safety classification pending"**
+- multi-vendor support proven (vendor code tables are inferred, not taken from vendor
+  specifications or observed traffic)
+- "without custom mapping" / "no per-vendor configuration"
+- edge-optimized or lightweight (the image was 372 MB in CI)
+- secure for clinical network use today
+- any throughput or latency figure
+
+## KNOWN GAPS — disclose honestly
+
+Status column is updated as Track E closes findings (see `ASSESSMENT_2026-09.md`).
+
+| Gap | Findings | Status |
+|---|---|---|
+| No authentication or TLS on ingest paths | F-01, F-08, F-09/10 | OPEN |
+| Some missing inputs default to "normal" | A1 | OPEN |
+| No staleness logic | A2 | OPEN |
+| FHIR bundles with warnings are not strictly valid R4 | H-01 | OPEN |
+| MLLP ACKs not fully conformant | A8, F-03 | OPEN |
+| No durable queue | A8 | OPEN |
+| No high availability | — | OPEN (not in scope) |
+| Regulatory classification unresolved | R-01, R-02 | OPEN |
+
+## REGULATORY HYPOTHESES — never assert; for counsel only
+
+- The FDA CDS guidance (revised January 2026; sources disagree on 6 vs 15 January —
+  to be verified) probably does not exempt a streaming ICU scoring product.
+- The ingest/normalise core *might* fit Medical Device Data System territory
+  (21 CFR 880.6310).
+- EU MDR Rule 11 likely classifies decision-support software IIa or higher.
+- Egypt EDA pathway for medical-device software: unknown; to be researched.
+- Consequence: for the next 6–12 months the software is offered **only** for
+  non-clinical use, research use, integration testing, and shadow-mode evaluation.
+  Outputs are never used for patient-care decisions.
