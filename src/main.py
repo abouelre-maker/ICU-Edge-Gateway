@@ -43,8 +43,10 @@ from config import (
     validate_news2_scoring_config,
 )
 from fastapi import Depends, FastAPI, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from infrastructure import log_privacy
 from infrastructure.adapters.hl7v2_adapter import HL7v2Adapter
 from infrastructure.provisioning.cert_store import CertStore
 from infrastructure.provisioning.reattestation import reattestation_loop
@@ -54,6 +56,9 @@ from infrastructure.streaming.mqtt_publisher import MQTTPublisher
 from infrastructure.streaming.ring_buffer import StoreAndForwardRingBuffer
 from infrastructure.streaming.subscription_dispatcher import SubscriptionDispatcher
 from infrastructure.streaming.subscription_registry import SubscriptionRegistry
+
+# F-12: pseudonymise patient identifiers in every log line from here on.
+log_privacy.install()
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -244,6 +249,25 @@ def create_app() -> FastAPI:
     app.add_middleware(BodySizeLimitMiddleware, max_bytes=get_max_request_body_bytes())
 
     # ── Global Exception Handlers ──────────────────────────────────────────────
+
+    @app.exception_handler(RequestValidationError)
+    async def request_validation_handler(
+        request: Request,  # noqa: ARG001
+        exc: RequestValidationError,
+    ) -> JSONResponse:
+        """
+        F-12: FastAPI's default 422 echoes each offending value ("input") back
+        to the caller -- for this API that is often a patient identifier or a
+        clinical value. Keep only where and why validation failed.
+        """
+        detail = [
+            {k: err[k] for k in ("type", "loc", "msg") if k in err}
+            for err in exc.errors()
+        ]
+        return JSONResponse(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            content={"detail": detail},
+        )
 
     @app.exception_handler(ValueError)
     async def value_error_handler(
