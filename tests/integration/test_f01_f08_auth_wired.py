@@ -104,3 +104,16 @@ class TestLiveWebSocketRequiresKey:
             ) as ws,
         ):
             ws.receive_text()
+
+
+class TestSubscriptionSecretNonAscii:
+    """F-06: a non-ASCII bearer value is a 401, never a 500."""
+
+    def test_non_ascii_secret_is_401(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("FHIR_SUBSCRIPTION_REGISTRATION_SECRET", "s" * 40)
+        with TestClient(create_app(), headers={}) as c:
+            r = c.get(
+                "/api/v1/fhir/Subscription",
+                headers={"Authorization": "Bearer sécret".encode()},  # type: ignore[dict-item]
+            )
+        assert r.status_code == 401

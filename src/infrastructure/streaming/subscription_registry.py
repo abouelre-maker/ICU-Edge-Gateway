@@ -58,18 +58,26 @@ from infrastructure.streaming.fhir_bundle_utils import extract_patient_id
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
 MAX_CONSECUTIVE_DELIVERY_ERRORS = 5
+DEFAULT_MAX_SUBSCRIPTIONS = 50
 
 
 class SubscriptionRegistry:
     """Thread-safe in-memory store + Bundle-to-subscription matcher."""
 
-    def __init__(self) -> None:
+    def __init__(self, max_subscriptions: int = DEFAULT_MAX_SUBSCRIPTIONS) -> None:
         self._subscriptions: dict[str, Subscription] = {}
         self._lock = threading.Lock()
+        self._max_subscriptions = max_subscriptions
 
     def create(self, subscription: Subscription) -> Subscription:
-        subscription.status = SubscriptionStatus.ACTIVE
         with self._lock:
+            # F-06: bounded registry; every subscription fans out each Bundle.
+            if len(self._subscriptions) >= self._max_subscriptions:
+                raise ValueError(
+                    f"Subscription limit reached ({self._max_subscriptions}); "
+                    "delete an existing Subscription first."
+                )
+            subscription.status = SubscriptionStatus.ACTIVE
             self._subscriptions[subscription.id] = subscription
         _log.info(
             "subscription_registry.created",

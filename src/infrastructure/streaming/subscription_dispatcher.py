@@ -60,10 +60,37 @@ import structlog
 
 from infrastructure.fhir.subscription import Subscription
 from infrastructure.streaming.subscription_registry import SubscriptionRegistry
+from infrastructure.streaming.url_safety import resolved_addresses_are_public
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
 _DEFAULT_DELIVERY_TIMEOUT_SECONDS = 10.0
+
+
+_DEFAULT_MAX_IN_FLIGHT = 100
+
+
+class _PublicOnlyTransport(httpx.AsyncHTTPTransport):
+    """
+    F-05: refuse a delivery unless every address the endpoint host resolves to
+    is public. Registration-time checks alone are bypassed by names that
+    resolve to internal addresses and by DNS rebinding.
+    ponytail: resolution is re-done by the connection pool right after this
+    check, so a sub-second rebinding window remains; pinning the checked IP
+    needs a custom network backend.
+    """
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        host = request.url.host
+        public = await asyncio.get_running_loop().run_in_executor(
+            None, resolved_addresses_are_public, host, request.url.port
+        )
+        if not public:
+            raise httpx.ConnectError(
+                "Webhook endpoint resolves to a non-public address (F-05).",
+                request=request,
+            )
+        return await super().handle_async_request(request)
 
 
 def _parse_header_lines(headers: tuple[str, ...]) -> dict[str, str]:
@@ -77,8 +104,9 @@ def _parse_header_lines(headers: tuple[str, ...]) -> dict[str, str]:
     """
     parsed: dict[str, str] = {}
     for line in headers:
-        if ":" not in line:
-            _log.warning("subscription_dispatcher.malformed_header_skipped", line=line)
+        if ":" not in line or any(c in line for c in "\r\n\x00"):
+            # F-07: never log the line itself -- it usually carries a credential.
+            _log.warning("subscription_dispatcher.malformed_header_skipped")
             continue
         name, _, value = line.partition(":")
         parsed[name.strip()] = value.strip()
@@ -98,13 +126,24 @@ class SubscriptionDispatcher:
         registry: SubscriptionRegistry,
         timeout_seconds: float = _DEFAULT_DELIVERY_TIMEOUT_SECONDS,
         http_client: httpx.AsyncClient | None = None,
+        max_in_flight: int = _DEFAULT_MAX_IN_FLIGHT,
     ) -> None:
         self._registry = registry
         self._timeout_seconds = timeout_seconds
-        # Redirects are NOT followed by default (httpx's own default) --
-        # deliberate: following a redirect would deliver clinical data to
-        # an endpoint that was never registered/validated (HAZARD-STREAM-006).
-        self._client = http_client or httpx.AsyncClient(timeout=timeout_seconds)
+        # Redirects are NOT followed (httpx default, stated explicitly) --
+        # following one would deliver clinical data to an endpoint that was
+        # never registered/validated (HAZARD-STREAM-006). The default client
+        # also re-checks the resolved address before every request (F-05).
+        self._client = http_client or httpx.AsyncClient(
+            timeout=timeout_seconds,
+            follow_redirects=False,
+            transport=_PublicOnlyTransport(),
+        )
+        # F-06: bounded fan-out -- at most this many deliveries in flight;
+        # beyond it a delivery is dropped and recorded as a failure instead
+        # of an unbounded pile of tasks.
+        self._max_in_flight = max_in_flight
+        self._in_flight: set[asyncio.Task[None]] = set()
 
     async def dispatch(self, bundle: dict[str, Any]) -> int:
         """
@@ -115,7 +154,19 @@ class SubscriptionDispatcher:
         """
         matches = self._registry.match(bundle)
         for sub in matches:
-            asyncio.ensure_future(self._deliver(sub, bundle))
+            if len(self._in_flight) >= self._max_in_flight:
+                self._registry.record_delivery_failure(
+                    sub.id, "Delivery dropped: too many deliveries in flight."
+                )
+                _log.warning(
+                    "subscription_dispatcher.delivery_dropped_over_cap",
+                    subscription_id=sub.id,
+                    cap=self._max_in_flight,
+                )
+                continue
+            task = asyncio.ensure_future(self._deliver(sub, bundle))
+            self._in_flight.add(task)
+            task.add_done_callback(self._in_flight.discard)
         return len(matches)
 
     def schedule_dispatch(self, bundle: dict[str, Any]) -> None:
