@@ -330,18 +330,28 @@ def _component_matches(component_id: str, codings: list[dict[str, Any]]) -> bool
 
 def extract_warnings(bundle: dict[str, Any] | None) -> list[str]:
     """
-    Read pipeline warnings from Bundle.note.
+    Read pipeline warnings from the Bundle.
 
-    bundle_assembler.py sets note only when the pipeline produced warnings,
-    so its absence means "no warnings", not "warnings unavailable".
+    Current gateways (H-01) put them in OperationOutcome issues coded
+    PIPELINE_WARNING; recordings made before that carry them in Bundle.note.
+    Absence means "no warnings", not "warnings unavailable".
     """
     if not isinstance(bundle, dict):
         return []
-    return [
+    found = [
         note.get("text", "")
         for note in bundle.get("note", []) or []
         if isinstance(note, dict) and note.get("text")
     ]
+    for entry in bundle.get("entry", []) or []:
+        res = entry.get("resource", {}) if isinstance(entry, dict) else {}
+        if res.get("resourceType") != "OperationOutcome":
+            continue
+        for issue in res.get("issue", []) or []:
+            codes = {c.get("code") for c in issue.get("details", {}).get("coding", [])}
+            if "PIPELINE_WARNING" in codes and issue.get("diagnostics"):
+                found.append(issue["diagnostics"])
+    return found
 
 
 @dataclass(frozen=True)

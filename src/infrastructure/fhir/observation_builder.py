@@ -106,8 +106,11 @@ _VITAL_SIGN_FHIR_MAP: Final[
     VitalSignType.CONSCIOUSNESS: (
         "67775-7",
         "Level of responsiveness",
-        "248234008",
-        "Neurological state finding (finding)",
+        # H-06: was 248234008, which is also the "Alert" VALUE code below.
+        # The Observation.code is the observable; the AVPU finding is the value.
+        # TODO-VERIFY: confirm 6942003 in the SNOMED CT browser (cf. H-08).
+        "6942003",
+        "Level of consciousness (observable entity)",
         "",  # No UCUM unit for categorical value
         "",
     ),

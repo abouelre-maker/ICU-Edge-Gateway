@@ -152,7 +152,7 @@ Present on **both** ingest endpoints:
 |---|---|---|
 | `X-CDS-Advisory-Only` | `true` | Always `true`. Advisory-only output. |
 | `X-Pipeline-Duration-Ms` | `1.69` | Domain pipeline duration for this request |
-| `X-Warning-Count` | `0` | Number of pipeline warnings (see `Bundle.note`) |
+| `X-Warning-Count` | `0` | Number of pipeline warnings (see the `OperationOutcome` entry) |
 | `X-NEWS2-Total` | `0` | **Omitted** when no score could be produced |
 | `X-NEWS2-Risk-Level` | `NORMAL` | `NORMAL`, `LOW`, `LOW_MEDIUM`, `MEDIUM`, `HIGH`. **Omitted** with the total. |
 | `Content-Type` | `application/fhir+json` | |
@@ -236,7 +236,7 @@ the NEWS2 `Observation`.
   component — a real bug found during development.
 - **Every component carries both a LOINC and a SNOMED coding.** Match on
   either.
-- **`Bundle.note[]` carries DSP pipeline warnings** (rejected artifacts). The
+- **An `OperationOutcome` entry carries DSP pipeline warnings** (issues coded `PIPELINE_WARNING`; `Bundle.note` before 2026-11-19) (rejected artifacts). The
   advisory note lives on the NEWS2 **Observation**, not the Bundle. Different
   arrays; do not conflate.
 - **A rejected reading is present, not absent.** Out-of-bounds observations
@@ -350,11 +350,11 @@ MSA|AA|ACK20260821120000|
 
 | Status | Cause |
 |---|---|
-| 200 | Success — including a degraded score with warnings in `Bundle.note` |
+| 200 | Success — including a degraded score with warnings in the `OperationOutcome` entry |
 | 422 | Invalid query/body parameter (e.g. `device_vendor=auto`) |
 | 500 | Unhandled error. The response body deliberately omits exception type, message and traceback (IEC 62304 REQ-API-002); the detail is in the server log. |
 
 A message whose NEWS2-mandatory parameter is rejected still returns **200**
-with a Bundle — the other observations are present, `Bundle.note` explains the
+with a Bundle — the other observations are present, the `OperationOutcome` entry explains the
 rejection, and the `X-NEWS2-*` headers are omitted. A degraded but honest
 response, not an error.

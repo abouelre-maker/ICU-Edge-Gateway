@@ -221,7 +221,7 @@ installed (`pip install -r requirements-dev.txt`).
 5. **Shows the resulting FHIR R4 Bundle** — the same standards-based output
    ([`bundle_assembler.py`](src/infrastructure/fhir/bundle_assembler.py)) any downstream
    EHR or CDS system would receive, including the rejected-artifact note as a
-   `Bundle.note` / `OperationOutcome` audit entry rather than a silently dropped value.
+   `OperationOutcome` audit entry rather than a silently dropped value.
    *Why it matters:* this is not a demo-only summary — it is the literal interoperable
    output this gateway produces for every real ingestion, HL7-in-FHIR-out.
 6. **Shows the live delta arriving on the WebSocket dashboard channel**
