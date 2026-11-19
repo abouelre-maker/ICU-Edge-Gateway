@@ -44,7 +44,20 @@ Each item: what is needed, options, recommendation, and what it blocks. Status i
 
 ### HD-E6 — BLOCKED-TEST-CONFLICT items
 - **Blocks:** each affected finding.
-- **Status:** OPEN — 4 entries (A2-1, A5-1, A5-2, A8-1).
+- **Status:** OPEN — 5 entries (A2-1, A5-1, A5-2, A8-1, F03-1).
+
+#### F03-1 — oversized MLLP frame: close without ACK vs send AR
+- **Test:** `tests/integration/test_mllp_listener.py::TestOversizedFrameRejected::test_frame_exceeding_max_bytes_is_rejected`.
+- **Assertion locked in:** `data = await reader.read(); assert data == b""  # connection closed with no ACK sent`.
+- **Behaviour it locks in:** a frame larger than the cap is answered by closing the
+  connection, with no NAK.
+- **Why it is a finding:** F-03 asks for an explicit AR so the sender knows the message was
+  refused rather than lost. Closing is not unsafe (nothing is accepted) but it is less
+  informative; many senders simply retransmit on a dropped connection.
+- **Now:** the cap works (stream `limit=` fixed), `LimitOverrunError` is handled with no
+  traceback, and the listener keeps accepting — only the AR itself is not sent.
+- **Options:** (1) amend the test to expect `MSA|AR|` and then close — **recommended**;
+  (2) keep close-without-ACK, WONTFIX.
 
 #### A8-1 — MLLP idempotency (duplicate MSH-10 re-processed)
 - **Test:** `tests/integration/test_mllp_listener.py::TestValidFrameAccepted::test_multiple_frames_on_one_persistent_connection`.

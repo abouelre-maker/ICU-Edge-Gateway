@@ -77,6 +77,10 @@ _CARRIAGE_RETURN: bytes = b"\x0d"  # CR
 _FRAME_TERMINATOR: bytes = _END_BLOCK + _CARRIAGE_RETURN
 
 _DEFAULT_MAX_FRAME_BYTES: int = 1_048_576  # 1 MiB — HAZARD-STREAM-001 mitigation
+# F-03: engineering DoS controls (not clinical values).
+_DEFAULT_FRAME_TIMEOUT_SECONDS: float = 30.0  # start block → end block
+_DEFAULT_IDLE_TIMEOUT_SECONDS: float = 600.0  # between frames on a persistent link
+_DEFAULT_MAX_CONNECTIONS: int = 64
 _DEFAULT_FORWARD_BUFFER_CAPACITY: int = 10_000
 
 
@@ -143,6 +147,9 @@ class MLLPListener:
         live_channel: LiveDashboardChannel | None = None,
         subscription_dispatcher: SubscriptionDispatcher | None = None,
         spo2_scale_resolver: Callable[[str], SpO2Scale | None] | None = None,
+        frame_timeout_seconds: float = _DEFAULT_FRAME_TIMEOUT_SECONDS,
+        idle_timeout_seconds: float = _DEFAULT_IDLE_TIMEOUT_SECONDS,
+        max_connections: int = _DEFAULT_MAX_CONNECTIONS,
     ) -> None:
         self._host = host
         self._port = port
@@ -165,6 +172,11 @@ class MLLPListener:
         self._live_channel = live_channel
         self._subscription_dispatcher = subscription_dispatcher
         self._server: asyncio.Server | None = None
+        self._frame_timeout = frame_timeout_seconds
+        self._idle_timeout = idle_timeout_seconds
+        self._max_connections = max_connections
+        self._active_connections = 0
+        self._handler_tasks: set[asyncio.Task[None]] = set()
 
     @property
     def forward_buffer(self) -> StoreAndForwardRingBuffer[dict[str, Any]]:
@@ -178,14 +190,25 @@ class MLLPListener:
         return self._port
 
     async def start(self) -> None:
+        # F-03: the stream limit must cover the configured frame cap; asyncio's
+        # 64 KiB default made the 1 MiB cap dead code (LimitOverrunError).
         self._server = await asyncio.start_server(
-            self._handle_connection, self._host, self._port
+            self._handle_connection,
+            self._host,
+            self._port,
+            limit=self._max_frame_bytes + len(_FRAME_TERMINATOR) + 1,
         )
         _log.info("mllp_listener.start", host=self._host, port=self.port)
 
     async def stop(self) -> None:
         if self._server is not None:
             self._server.close()
+            # server.close() does not close live client connections; cancel
+            # their handlers so none is left pending (F-03 connection hygiene).
+            for task in list(self._handler_tasks):
+                task.cancel()
+            if self._handler_tasks:
+                await asyncio.gather(*self._handler_tasks, return_exceptions=True)
             await self._server.wait_closed()
             _log.info("mllp_listener.stop")
             self._server = None
@@ -204,6 +227,17 @@ class MLLPListener:
     ) -> None:
         peer = writer.get_extra_info("peername")
         log = _log.bind(peer=str(peer))
+        if self._active_connections >= self._max_connections:
+            # F-03: refuse beyond the connection cap rather than queue unbounded.
+            log.warning("mllp_listener.connection.refused_over_cap", cap=self._max_connections)
+            writer.close()
+            with contextlib.suppress(Exception):
+                await writer.wait_closed()
+            return
+        self._active_connections += 1
+        task = asyncio.current_task()
+        if task is not None:
+            self._handler_tasks.add(task)
         log.info("mllp_listener.connection.open")
         try:
             while True:
@@ -226,7 +260,12 @@ class MLLPListener:
             log.warning("mllp_listener.connection.truncated")
         except (ConnectionResetError, ConnectionAbortedError):
             log.info("mllp_listener.connection.reset_by_peer")
+        except TimeoutError:
+            log.warning("mllp_listener.connection.read_timeout")
         finally:
+            self._active_connections -= 1
+            if task is not None:
+                self._handler_tasks.discard(task)
             writer.close()
             with contextlib.suppress(Exception):
                 await writer.wait_closed()
@@ -240,11 +279,17 @@ class MLLPListener:
         Raises asyncio.IncompleteReadError if the connection closes mid-frame.
         """
         try:
-            leading = await reader.readuntil(_START_BLOCK)
+            leading = await asyncio.wait_for(
+                reader.readuntil(_START_BLOCK), timeout=self._idle_timeout
+            )
         except asyncio.IncompleteReadError as exc:
             if not exc.partial:
                 return None  # clean EOF, no partial data — normal disconnect
             raise
+        except asyncio.LimitOverrunError as exc:
+            raise MLLPFramingError(
+                "More than the frame limit of bytes before any MLLP start block."
+            ) from exc
 
         discarded = leading[:-1]
         if discarded:
@@ -252,7 +297,18 @@ class MLLPListener:
             # never treated as message content.
             log.warning("mllp_listener.frame.leading_bytes_discarded", n=len(discarded))
 
-        body_and_terminator = await reader.readuntil(_FRAME_TERMINATOR)
+        try:
+            body_and_terminator = await asyncio.wait_for(
+                reader.readuntil(_FRAME_TERMINATOR), timeout=self._frame_timeout
+            )
+        except asyncio.LimitOverrunError as exc:
+            # F-03: handled explicitly (was an unhandled exception + reset).
+            # The connection is closed without an ACK — the existing test
+            # contract; sending AR instead is BLOCKED-TEST-CONFLICT F03-1.
+            raise MLLPFramingError(
+                f"MLLP frame exceeds the {self._max_frame_bytes}-byte maximum "
+                "(HAZARD-STREAM-001)."
+            ) from exc
 
         if len(body_and_terminator) > self._max_frame_bytes:
             raise MLLPFramingError(
