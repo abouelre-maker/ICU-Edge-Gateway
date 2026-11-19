@@ -192,7 +192,9 @@ finding is implemented.
 - **Options:** values set by a clinical safety reviewer per parameter (RR, SpO2, O2
   status, SBP, HR, consciousness, temperature).
 - **Recommendation:** no engineering default is invented; tests use fixture values only.
-- **Status:** OPEN
+- **Status:** OPEN for production. 2026-11-19: a labelled DEMONSTRATION profile
+  (`deploy/profiles/news2-staleness.demo.env`, not clinically validated) lets the synthetic demo run;
+  production still has no default and refuses to start without approved values.
 
 ### HD-E8 — Final between-band policy (N-01)
 - **Blocks:** N-01 closure.

@@ -196,6 +196,8 @@ starting points produced by the software engineer, not a licensed clinical risk 
 | ID | Potential Harm | Sev | Prob (pre) | Risk Index (pre) | Prob (post) | Risk Index (post) | Status |
 |---|---|---|---|---|---|---|---|
 | HAZARD-CORS-001 | Unauthorized cross-origin data exposure | 3 | 4 | 12 | 1 | 3 | Closed - Mitigated |
+| HAZARD-SEC-001 | Unauthenticated injection or reading of clinical data | — | — | — | — | — | Open - Mitigated, PROPOSED (added 2026-11-19, unscored) |
+| HAZARD-SEC-002 | Patient identifiers disclosed through metadata channels | — | — | — | — | — | Open - Mitigated, PROPOSED (added 2026-11-19, unscored) |
 
 ### 3.F Module F — Streaming & Provisioning Infrastructure (Phase 5-Stream)
 
@@ -515,6 +517,15 @@ One record per hazard ID, all fields transcribed verbatim from `ICU_Edge_Gateway
 - **Next Review Trigger:** Any relaxation of tz-aware enforcement
 - **Phase Assignment:** Phase 5 - Closed
 
+**UPDATE 2026-11-19 (configuration, decision HD-E7 still open):** the per-parameter staleness
+windows remain deployment configuration with no built-in default; the gateway refuses to start
+until all seven are set. `deploy/profiles/news2-staleness.demo.env` supplies a labelled
+DEMONSTRATION profile for the synthetic demo only (5 min HR/SpO2/RR, 30 min SBP, 1 h O2, 4 h
+temperature and ACVPU), explicitly not clinically validated. Production values must be approved
+by the clinical safety officer and recorded here before patient-facing use. Checked 2026-11-19:
+with the demo profile fresh readings are scored and 2-hour-old readings are withheld
+(STALE_OBSERVATION).
+
 #### HAZARD-ARCH-001
 
 - **Severity:** 5 &nbsp;|&nbsp; **Probability (pre-mitigation):** 2 &nbsp;|&nbsp; **Risk Index (pre-mitigation):** 10
@@ -801,6 +812,44 @@ One record per hazard ID, all fields transcribed verbatim from `ICU_Edge_Gateway
 - **Next Review Trigger:** Any change to get_cors_allowed_origins() or the CORSMiddleware wiring in main.py
 - **Phase Assignment:** Phase 6 - Closed
 
+#### HAZARD-SEC-001
+
+*(Added 2026-11-19 from the September 2026 hardening assessment, findings F-01 and F-08.)*
+
+- **Severity:** *(not yet scored)* &nbsp;|&nbsp; **Probability (pre-mitigation):** *(not yet scored)* &nbsp;|&nbsp; **Risk Index (pre-mitigation):** *(not yet scored)*
+- **Probability (post-mitigation):** *(not yet scored)* &nbsp;|&nbsp; **Risk Index (post-mitigation):** *(not yet scored)*
+- **Hazard (Cause):** `/api/v1/ingest`, `/api/v1/vitals` and `WS /api/v1/live/vitals` accepted requests from anyone who could reach the port; MLLP listened on all interfaces with no peer control.
+- **Hazardous Situation:** A network-reachable party injects fabricated vital signs for a real patient identifier, or subscribes to the live stream of every patient's data.
+- **Potential Harm:** A clinician acts on a falsified early-warning score; disclosure of patient data.
+- **Existing Risk Control / Mitigation:** API key required on ingest/vitals (`require_api_key`, SHA-256 digests compared with `hmac.compare_digest`); the gateway refuses to start without at least one key of 32+ characters (`validate_gateway_auth_config`, fail closed); the WebSocket requires the key and an allowed Origin (`authorize_websocket`, close 1008); MLLP binds 127.0.0.1 by default and refuses peers outside `MLLP_ALLOWED_CLIENTS`; TLS terminated by the reverse proxy in `deploy/reverse-proxy/nginx.conf` (mutual TLS available for MLLP).
+- **Verification Evidence:** tests/unit/test_f01_f08_auth.py; tests/integration/test_f01_f08_auth_wired.py; tests/unit/test_config.py::TestGetMllpHost; live check 2026-11-19 (no key 401, wrong key 401, WebSocket without key refused, valid key 200); CI `nginx -t` job.
+- **Residual Risk Acceptability:** Not yet assessed
+- **Status:** Open - Mitigated, PROPOSED, pending risk-management scoring
+- **Decision / Rationale:** Single shared key class (no per-user identity or roles); key rotation and storage are deployment responsibilities. Behind the proxy every MLLP peer appears as loopback, so per-device control relies on mutual TLS.
+- **Decision Owner:** Awaiting assignment
+- **Decision Date:** TBD
+- **Next Review Trigger:** Any change to `src/api/auth.py`, router dependencies in `main.py`, or MLLP bind/allow-list configuration
+- **Phase Assignment:** Hardening 2026-11 - Mitigated
+
+#### HAZARD-SEC-002
+
+*(Added 2026-11-19 from findings F-04 and F-12.)*
+
+- **Severity:** *(not yet scored)* &nbsp;|&nbsp; **Probability (pre-mitigation):** *(not yet scored)* &nbsp;|&nbsp; **Risk Index (pre-mitigation):** *(not yet scored)*
+- **Probability (post-mitigation):** *(not yet scored)* &nbsp;|&nbsp; **Risk Index (post-mitigation):** *(not yet scored)*
+- **Hazard (Cause):** The raw patient identifier was the last MQTT topic level, was written to logs, and was echoed back in 422 validation bodies.
+- **Hazardous Situation:** Broker logs, wildcard subscribers, log aggregators or API callers obtain patient identifiers outside the encrypted payload.
+- **Potential Harm:** Disclosure of protected health information.
+- **Existing Risk Control / Mitigation:** MQTT topic segment is HMAC-SHA256(`MQTT_TOPIC_KEY`, identifier) truncated to 128 bits; with MQTT enabled the gateway refuses to start without a 32+ character key; a structlog processor (`src/infrastructure/log_privacy.py`) pseudonymises `patient_id`, `patient`, `mrn` and `criteria` values; request-validation 422 bodies keep `type`, `loc` and `msg` only.
+- **Verification Evidence:** tests/unit/test_f04_opaque_topic.py; tests/unit/test_mqtt_publisher.py; tests/integration/test_f12_f13_privacy.py
+- **Residual Risk Acceptability:** Not yet assessed
+- **Status:** Open - Mitigated, PROPOSED, pending risk-management scoring
+- **Decision / Rationale:** Free-text fields (e.g. parser error messages) are not pseudonymised; without `LOG_PSEUDONYM_KEY` pseudonyms change on restart.
+- **Decision Owner:** Awaiting assignment
+- **Decision Date:** TBD
+- **Next Review Trigger:** Any new log field or topic that carries an identifier
+- **Phase Assignment:** Hardening 2026-11 - Mitigated
+
 ### Module F — Streaming & Provisioning Infrastructure (Phase 5-Stream)
 
 #### HAZARD-STREAM-006
@@ -819,6 +868,15 @@ One record per hazard ID, all fields transcribed verbatim from `ICU_Edge_Gateway
 - **Decision Date:** TBD
 - **Next Review Trigger:** Before any deployment where webhook subscribers are outside an operator-trusted allowlist
 - **Phase Assignment:** Phase 5-Stream - Backlog
+
+**UPDATE 2026-11-19 (finding F-05):** the statement "trusted (not re-checked) by
+subscription_dispatcher.py at delivery time" no longer holds. Every delivery re-resolves the
+endpoint host and is refused unless all resolved addresses are public (`_PublicOnlyTransport`,
+`resolved_addresses_are_public`); redirects are never followed (stated explicitly); decimal,
+octal, hex and short IPv4 literals, IPv4-mapped IPv6, wildcard-DNS names and embedded credentials
+are refused at registration. Residual: the connection pool resolves again immediately after the
+check, leaving a sub-second DNS-rebinding window until the checked address is pinned. Evidence:
+tests/unit/test_f05_f07_subscription_hardening.py.
 
 #### HAZARD-STREAM-007
 
@@ -870,6 +928,14 @@ One record per hazard ID, all fields transcribed verbatim from `ICU_Edge_Gateway
 - **Decision Date:** TBD
 - **Next Review Trigger:** Next scheduled risk register review
 - **Phase Assignment:** Phase 5-Stream - Backlog
+
+**UPDATE 2026-11-19 (findings F-06, F-07):** additional controls: the registration secret is
+compared as SHA-256 digests (a non-ASCII value is a 401, not a 500); at most 50 subscriptions and
+100 in-flight deliveries; channel.header lines must be RFC 9110 `Name: value` lines without control
+characters (no CR/LF injection); responses show header names with values redacted, so one caller
+can no longer read another subscriber's credential; malformed stored lines are skipped without
+logging their content. Evidence: tests/unit/test_f05_f07_subscription_hardening.py;
+tests/integration/test_f01_f08_auth_wired.py::TestSubscriptionSecretNonAscii.
 
 #### HAZARD-STREAM-010
 
@@ -950,6 +1016,16 @@ independently reworded here.)*
 - **Decision Date:** TBD
 - **Next Review Trigger:** Human risk-management sign-off on residual in-frame corruption risk; any change to mllp_listener.py framing logic
 - **Phase Assignment:** Phase 5-Stream - Backlog
+
+**UPDATE 2026-11-19 (mitigation evidence; Sev/Prob/Status unchanged):** an oversized frame
+is now answered `MSA|AR` and the connection closed after a bounded discard of the remaining
+input (finding F03-1; tests/integration/test_a8_mllp_dedup.py::test_oversized_frame_over_stream_limit_gets_ar).
+New behaviour with its own residual risk: byte-identical retransmissions of an accepted message
+(same MSH-3, MSH-4, MSH-10 and SHA-256 of the frame) are acknowledged `AA` but not processed again;
+a reused MSH-10 with different content is processed and logged as a warning, so new clinical data
+is never discarded (test_reused_control_id_with_new_content_is_processed). The de-duplication
+memory is an in-memory LRU of 10,000 keys and is lost on restart, so a retransmission after a
+restart is processed again (duplicate downstream record, not lost data).
 
 #### HAZARD-STREAM-002
 

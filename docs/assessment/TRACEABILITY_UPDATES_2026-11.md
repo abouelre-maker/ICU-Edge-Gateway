@@ -1,4 +1,9 @@
-# Traceability updates pending regulatory review (2026-11-19)
+# Traceability updates (2026-11-19) — APPLIED
+
+**Status:** applied to RMF-001, SRS-001, SAD-001 and RTM-001 on 2026-11-19 at the project
+owner's instruction. New IDs: HAZARD-SEC-001, HAZARD-SEC-002, REQ-API-011, REQ-SEC-001,
+REQ-SEC-002. New hazards are unscored and still need the clinical safety reviewer (HD-E4).
+The list below is kept as the record of what was changed.
 
 The 2026-11-19 hardening changed behaviour that the controlled documents describe.
 Those documents (RMF-001, SRS-001, SAD-001, RTM-001) were **not edited**: changes to
