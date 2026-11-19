@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import dataclasses
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -321,6 +322,8 @@ class HL7v2Adapter:
                 warnings.append(warn)
                 log.warning("hl7v2_adapter.obx.unexpected_error", error=str(exc))
 
+        samples = _apply_corrections(samples)
+
         log.info(
             "hl7v2_adapter.parse.complete",
             sample_count=len(samples),
@@ -414,17 +417,58 @@ class HL7v2Adapter:
         - OBX-5 value is empty or unparseable
         - OBX-11 result status is not F (Final) or P (Preliminary)
 
-        IEC 62304 REQ-HL7-002: Only Final (F) and Preliminary (P) observations
-        are accepted. Corrected (C) and entered-in-error (W) are excluded.
+        A3: Final (F), Preliminary (P) and Corrected (C) observations are
+        accepted; a C value replaces an earlier F/P of the same type in the
+        same message (see _apply_corrections) and raises CORRECTION_PENDING so
+        downstream consumers supersede previously sent results. An absent
+        OBX-11 is accepted but reported (MISSING_RESULT_STATUS). Any other
+        status (e.g. W entered-in-error, X, I, D) is excluded.
         """
-        # OBX-11: Result Status — only accept F (Final) and P (Preliminary)
-        status = _safe_field(obx, "obx_11").upper().strip()
-        if status and status not in {"F", "P"}:
+        raw_status = _safe_field(obx, "obx_11").strip()
+        status = raw_status.upper()
+        if status and status not in {"F", "P", "C"}:
             warnings.append(
-                f"[OBX-SKIP] OBX-11 status '{status}' is not F/P — skipped. "
+                f"[OBX-SKIP] OBX-11 status '{status}' is not F/P/C — skipped. "
                 "IEC 62304 REQ-HL7-002."
             )
             return None
+        if raw_status and raw_status != status:
+            warnings.append(f"[OBX-STATUS] OBX-11 '{raw_status}' normalised to '{status}'.")
+        sample = self._parse_obx_body(
+            obx, vendor, device_id, patient_id, msg_timestamp, warnings, findings
+        )
+        if sample is None:
+            return None
+        if findings is not None:
+            if status == "C":
+                findings.append(
+                    Finding(
+                        ReasonCode.CORRECTION_PENDING,
+                        sample.vital_sign_type,
+                        "Corrected result: supersedes any previously sent value.",
+                    )
+                )
+            elif not status:
+                findings.append(
+                    Finding(
+                        ReasonCode.MISSING_RESULT_STATUS,
+                        sample.vital_sign_type,
+                        "OBX-11 result status absent.",
+                    )
+                )
+        return dataclasses.replace(sample, result_status=status)
+
+    def _parse_obx_body(
+        self,
+        obx: object,
+        vendor: MonitorVendor,
+        device_id: str,
+        patient_id: str,  # noqa: ARG002
+        msg_timestamp: datetime | None,
+        warnings: list[str],
+        findings: list[Finding] | None,
+    ) -> VitalSignSample | None:
+        """OBX-3/5/6/14 parsing (status already handled by _parse_obx)."""
 
         # OBX-3: Observation Identifier → VitalSignType.
         # Resolved before the value-type branch below so waveform handling can
@@ -946,6 +990,25 @@ def _parse_hl7_datetime(hl7_ts: str) -> datetime:
                 continue
 
     return datetime.now(tz=timezone.utc)
+
+
+def _apply_corrections(samples: list[VitalSignSample]) -> list[VitalSignSample]:
+    """
+    A3: within one message, a Corrected (C) value replaces any earlier F/P
+    value of the same vital sign type observed at or before the same time.
+    """
+    corrected = [s for s in samples if s.result_status == "C"]
+    if not corrected:
+        return samples
+    return [
+        s
+        for s in samples
+        if s.result_status == "C"
+        or not any(
+            c.vital_sign_type is s.vital_sign_type and s.timestamp <= c.timestamp
+            for c in corrected
+        )
+    ]
 
 
 def _parse_hl7_datetime_strict(hl7_ts: str) -> datetime | None:
