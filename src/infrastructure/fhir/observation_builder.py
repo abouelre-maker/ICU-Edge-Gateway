@@ -36,6 +36,16 @@ _IEC62304_EXT: Final = "https://samd.icu-edge/fhir/extensions/iec62304-software-
 _OUTLIER_EXT: Final = "https://samd.icu-edge/fhir/extensions/dsp-outlier-count"
 _ARTIFACT_EXT: Final = "https://samd.icu-edge/fhir/extensions/physiological-bounds-flag"
 
+# N-02: HL7 OBX-11 result status → FHIR R4 Observation.status. An absent
+# OBX-11 keeps the historical "final" (the absence itself is reported as the
+# MISSING_RESULT_STATUS finding in the bundle's OperationOutcome).
+_RESULT_STATUS_TO_FHIR: Final[dict[str, str]] = {
+    "F": "final",
+    "P": "preliminary",
+    "C": "corrected",
+    "": "final",
+}
+
 # Software version stamp injected into every Observation extension.
 _SW_VERSION: Final = "1.0.0"
 
@@ -177,7 +187,7 @@ class ObservationBuilder:
             "meta": {
                 "profile": [_VS_PROFILE],
             },
-            "status": "final",
+            "status": _RESULT_STATUS_TO_FHIR.get(sample.result_status, "unknown"),
             "category": [
                 {
                     "coding": [

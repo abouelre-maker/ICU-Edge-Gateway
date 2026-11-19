@@ -302,6 +302,24 @@ class ScoringGate:
                 )
             )
 
+        # N-02: a score built on a preliminary result is itself preliminary.
+        prelim = sorted(
+            {
+                pv.original.vital_sign_type
+                for pv in inputs
+                if pv.original.result_status == "P" and pv.is_within_physiological_bounds
+            },
+            key=lambda t: t.value,
+        )
+        for vt in prelim:
+            findings.append(
+                Finding(
+                    ReasonCode.PRELIMINARY_RESULT,
+                    vt,
+                    "Input is a preliminary result; any score is preliminary.",
+                )
+            )
+
         # A2: freshness of the most recent admitted sample of each input.
         policy = self._policy_provider()
         if policy is None:

@@ -128,6 +128,8 @@ class BundleAssembler:
                     device_id=device_id,
                     encounter_id=encounter_id,
                 )
+                if "PRELIMINARY_RESULT" in result.assessment.reason_codes:
+                    news2_dict["status"] = "preliminary"  # N-02
                 # A2: effective time is when the inputs were observed, not
                 # when the score was calculated; calculation time → issued.
                 news2_dict["issued"] = news2_dict["effectiveDateTime"]
