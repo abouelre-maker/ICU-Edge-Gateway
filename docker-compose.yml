@@ -62,6 +62,9 @@ services:
   gateway:
     build:
       context: .
+    # HD-E7: labelled DEMONSTRATION staleness profile (not clinically validated).
+    env_file:
+      - deploy/profiles/news2-staleness.demo.env
     depends_on:
       ca-bundle-fetcher:
         condition: service_completed_successfully

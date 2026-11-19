@@ -134,6 +134,9 @@ if not defined GATEWAY_API_KEYS (
     for /f "usebackq delims=" %%K in (`"%PY_APP%" -c "import secrets; print(secrets.token_urlsafe(32))"`) do set "GATEWAY_API_KEYS=%%K"
 )
 if not defined GATEWAY_API_KEY for /f "tokens=1 delims=," %%K in ("%GATEWAY_API_KEYS%") do set "GATEWAY_API_KEY=%%K"
+REM -- HD-E7: NEWS2 staleness windows from the labelled DEMONSTRATION profile
+REM    (not clinically validated). Values already set in the environment win.
+for /f "usebackq eol=# tokens=1,2 delims==" %%A in ("%REPO_ROOT%\deploy\profiles\news2-staleness.demo.env") do if not defined %%A set "%%A=%%B"
 
 echo   Starting gateway ^(uvicorn, MLLP enabled^)...
 start "ICU Gateway" cmd /k "cd /d "%REPO_ROOT%" && set MLLP_ENABLED=1&& set MLLP_PORT=%MLLP_PORT%&& set PYTHONPATH=src&& "%PY_APP%" -m uvicorn main:app --host 127.0.0.1 --port %GATEWAY_PORT%"
