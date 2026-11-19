@@ -242,8 +242,10 @@ jobs:
           echo "header case: $out"
           echo "$out" | grep -q '"auth": "Bearer HDR456"' || { echo "::error::client header not passed through"; exit 1; }
 
-          docker exec proxy cat /var/log/nginx/access.log | grep -q TOKEN123 \
-            && { echo "::error::token written to the access log"; exit 1; } || echo "access log clean"
+          # In the official image the log files are links to the container's
+          # stdout/stderr, so read them with `docker logs` (access + error log).
+          docker logs proxy 2>&1 | grep -q TOKEN123 \
+            && { echo "::error::token written to the nginx logs"; exit 1; } || echo "nginx logs clean"
 
           curl -s -m 3 http://127.0.0.1/ >/dev/null 2>&1 \
             && { echo "::error::port 80 is listening"; exit 1; } || echo "no port 80 listener"
