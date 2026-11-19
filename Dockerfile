@@ -75,9 +75,15 @@ LABEL org.opencontainers.image.title="ICU Edge-to-FHIR Interoperability Gateway"
 # Minimal runtime system libraries
 # libstdc++: required by scipy/numpy shared objects compiled with g++
 # openblas: BLAS backend — shared library used by scipy at runtime
-RUN apk add --no-cache \
+# S-06: `apk upgrade` pulls Alpine security fixes released after the pinned
+# base digest (Trivy fails the build on fixable HIGH/CRITICAL). setuptools and
+# wheel are build tools the runtime never imports; removing them drops the
+# vulnerable copies vendored inside setuptools (e.g. jaraco.context, wheel).
+RUN apk upgrade --no-cache \
+ && apk add --no-cache \
         libstdc++ \
-        openblas
+        openblas \
+ && python -m pip uninstall -y setuptools wheel
 
 # Non-root user (IEC 62304 security requirement — least-privilege principle)
 # Clinical edge servers must not run application processes as root.
