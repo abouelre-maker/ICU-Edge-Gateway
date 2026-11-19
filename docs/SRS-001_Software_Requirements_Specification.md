@@ -333,7 +333,7 @@ column (which class/function implements each requirement).
 
 ## 6. Known Gaps in This SRS (compiled transparently, not omitted)
 
-- **The entire Phase 5-Stream layer has zero `REQ-*` tags** (§1.2) — MQTT publishing, the
+- **The Phase 5-Stream layer has no `REQ-*` tags except REQ-SEC-002** (added 2026-11-19 for MQTT topics; §1.2) — MQTT publishing, the
   WebSocket live dashboard, FHIR Subscriptions, and mTLS device enrollment/reattestation are
   all `HAZARD-STREAM-*`-risk-tagged but have no corresponding functional-requirement tagging
   convention applied. This SRS cannot specify requirements that were never written down as

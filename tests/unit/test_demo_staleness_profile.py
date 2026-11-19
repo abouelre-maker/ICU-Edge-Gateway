@@ -13,20 +13,11 @@ import re
 from pathlib import Path
 
 import yaml
-from domain.services.scoring_gate import WINDOW_ENV_TEMPLATE
+from domain.services.scoring_gate import window_env_names
 
 ROOT = Path(__file__).resolve().parents[2]
 PROFILE = ROOT / "deploy" / "profiles" / "news2-staleness.demo.env"
 COMPOSE = ROOT / "docker-compose.yml"
-TYPES = (
-    "RESPIRATORY_RATE",
-    "SPO2",
-    "SUPPLEMENTAL_O2",
-    "SYSTOLIC_BP",
-    "HEART_RATE",
-    "CONSCIOUSNESS",
-    "TEMPERATURE_CELSIUS",
-)
 
 
 def _profile() -> dict[str, str]:
@@ -39,7 +30,9 @@ def _profile() -> dict[str, str]:
 
 
 def test_profile_covers_every_required_window() -> None:
-    expected = {WINDOW_ENV_TEMPLATE.format(name=t) for t in TYPES}
+    # Derived from the scoring gate itself, so a new required type cannot
+    # slip past this check.
+    expected = set(window_env_names())
     values = _profile()
     assert set(values) == expected
     assert all(int(v) > 0 for v in values.values())
@@ -56,6 +49,27 @@ def test_compose_fallbacks_equal_the_profile_and_host_values_win() -> None:
 
 
 def test_src_carries_no_default_window() -> None:
-    pattern = re.compile(r"NEWS2_STALENESS_WINDOW_\w+_SECONDS\s*[,)]?\s*[\"']?\d")
+    # Any literal staleness variable name followed by a default argument, in
+    # getenv / environ.get / setdefault form, or an assignment of a number.
+    patterns = [
+        re.compile(r"NEWS2_STALENESS_WINDOW_\w+_SECONDS[\"']\s*,\s*[\"']?\d"),
+        re.compile(r"NEWS2_STALENESS_WINDOW_\w+_SECONDS\s*=\s*[\"']?\d"),
+    ]
     for py in (ROOT / "src").rglob("*.py"):
-        assert not pattern.search(py.read_text(encoding="utf-8")), py
+        text = py.read_text(encoding="utf-8")
+        for pattern in patterns:
+            assert not pattern.search(text), (py, pattern.pattern)
+
+
+def test_default_pattern_catches_the_common_forms() -> None:
+    samples = [
+        'os.getenv("NEWS2_STALENESS_WINDOW_SPO2_SECONDS", "300")',
+        "os.environ.get('NEWS2_STALENESS_WINDOW_SPO2_SECONDS', 300)",
+        "NEWS2_STALENESS_WINDOW_SPO2_SECONDS = 300",
+    ]
+    patterns = [
+        re.compile(r"NEWS2_STALENESS_WINDOW_\w+_SECONDS[\"']\s*,\s*[\"']?\d"),
+        re.compile(r"NEWS2_STALENESS_WINDOW_\w+_SECONDS\s*=\s*[\"']?\d"),
+    ]
+    for sample in samples:
+        assert any(p.search(sample) for p in patterns), sample

@@ -64,7 +64,7 @@ matrix show that layer as its own honest, explicit gap?
 2. **The layer is not unowned or unreviewed** — it carries 12 `HAZARD-STREAM-*` tags (see §5
    below for the full count, including a discrepancy this compilation found) plus
    `HAZARD-ARCH-001`/`HAZARD-DSP-007` cross-references, all traceable to source line and (for
-   006-012) to RMF-001's register. It is hazard-tracked. It is not requirement-tracked. These
+   006-012) to RMF-001's register. It is hazard-tracked. It is not requirement-tracked *(Update 2026-11-19: one streaming requirement now exists — REQ-SEC-002, tagged in `src/infrastructure/streaming/mqtt_publisher.py` (opaque MQTT topics). The rest of the layer — live dashboard, FHIR Subscriptions, provisioning — remains hazard-tracked only.)*. These
    are genuinely different states, and collapsing them by manufacturing requirement tags would
    hide that distinction rather than resolve it.
 3. Retroactively-authored requirements would need the same "is this a docstring restated as
@@ -200,8 +200,9 @@ sensitive-looking message, drives it through the real ASGI app/middleware stack 
 
 ## 6. Phase 5-Stream Layer — "Hazard-Tracked, Requirement-Tracking Not Yet Applied" (§2 decision, applied)
 
-No `REQ-*` rows exist for this layer (confirmed: `grep -rno "REQ-[A-Z0-9-]*"
-src/infrastructure/streaming/ src/infrastructure/provisioning/` returns zero matches). What
+At first compilation no `REQ-*` rows existed for this layer (`grep -rno "REQ-[A-Z0-9-]*"
+src/infrastructure/streaming/ src/infrastructure/provisioning/` returned zero matches). Since
+2026-11-19 that grep returns exactly one ID, REQ-SEC-002 in `mqtt_publisher.py`. What
 **does** exist, re-verified in this revision directly against source:
 
 | Hazard ID | Source location | In Risk Register (`ICU_Edge_Gateway_Risk_Register_2.xlsx`)? |
@@ -299,7 +300,7 @@ already existed; only its source-traceability was missing).
 
 ## 7. Self-Flagged Gaps (this document)
 
-- **Phase 5-Stream layer has zero `REQ-*` rows** — by explicit decision, §2 above, not an
+- **Phase 5-Stream layer has one `REQ-*` row (REQ-SEC-002, added 2026-11-19); the rest has none** — by explicit decision, §2 above, not an
   oversight. Unchanged by this revision's follow-up work (§6.1/§6.2), which closed the
   hazard-*tracking* gaps for this layer, not the requirement-tracking one — that decision stands.
 - **~~HAZARD-STREAM-001 through -005 were source-only~~ — RESOLVED 2026-08-10 (§6.1):** added as
