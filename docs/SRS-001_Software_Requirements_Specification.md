@@ -33,7 +33,8 @@
 **Status:** DRAFT — engineering-compiled working document, not a certified SRS.
 **Prepared:** 2026-08-10, Phase 5-Stream Section E.
 **Seeded from:** every `REQ-[A-Z0-9-]+` identifier found in `src/` at compilation time — **17
-unique requirement IDs**, listed exhaustively in §3. Each requirement statement below is
+unique requirement IDs** at first compilation, **20** since 2026-11-19 (REQ-API-011, REQ-SEC-001 and
+REQ-SEC-002 added and tagged in `src/`), listed exhaustively in §3. Each requirement statement below is
 derived directly from the docstring/comment at its cited source location, not invented —
 where a docstring's wording is a design note rather than a crisp "shall" statement, this
 document restates it as one and flags that restatement explicitly, rather than presenting an
@@ -332,7 +333,7 @@ column (which class/function implements each requirement).
 
 ## 6. Known Gaps in This SRS (compiled transparently, not omitted)
 
-- **The entire Phase 5-Stream layer has zero `REQ-*` tags** (§1.2) — MQTT publishing, the
+- **The Phase 5-Stream layer has no `REQ-*` tags except REQ-SEC-002** (added 2026-11-19 for MQTT topics; §1.2) — MQTT publishing, the
   WebSocket live dashboard, FHIR Subscriptions, and mTLS device enrollment/reattestation are
   all `HAZARD-STREAM-*`-risk-tagged but have no corresponding functional-requirement tagging
   convention applied. This SRS cannot specify requirements that were never written down as

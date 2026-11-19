@@ -1,11 +1,19 @@
 # =============================================================================
-# Release image: build, push to GHCR, attach SBOM, sign (S-06)
+# Release image: build, sign, attest SBOM, THEN publish tags (S-06)
 #
-# Runs on pushes to main and on v* tags. Keyless Sigstore signing: the
-# signature is bound to this workflow's GitHub OIDC identity, so no signing
-# key exists to leak. Verify with:
-#   cosign verify ghcr.io/abouelre-maker/icu-edge-gateway:main \
-#     --certificate-identity-regexp 'https://github.com/abouelre-maker/ICU-Edge-Gateway/' \
+# Runs only on pushes to main and on v* tags (no manual dispatch, so an
+# unreviewed branch can never be published). The image is first pushed under a
+# temporary per-run tag, signed and SBOM-attested with keyless cosign, and
+# verified against THIS workflow's identity; only then are sha-<commit> and the
+# moving tag (main / vX.Y.Z) pointed at that exact signed digest, and only if
+# the commit is still the head of its ref. A failed signing step therefore
+# never leaves a deployable tag on an unsigned image.
+# Release tags (v*) should be restricted to maintainers with a repository tag
+# ruleset; this repository has a single maintainer.
+#
+# Verify (pin the digest you will run):
+#   cosign verify ghcr.io/abouelre-maker/icu-edge-gateway@sha256:<digest> \
+#     --certificate-identity-regexp '^https://github.com/abouelre-maker/ICU-Edge-Gateway/\.github/workflows/release-image\.yml@refs/(heads/main|tags/v.+)$' \
 #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
 # =============================================================================
 name: Release image
@@ -14,14 +22,20 @@ on:
   push:
     branches: [main]
     tags: ["v*"]
-  workflow_dispatch:
 
 permissions:
   contents: read
 
+# One publication per ref at a time, in commit order: a newer push waits for
+# the running one, and an older queued run is superseded by the newer one, so
+# an older build can never move the tag after a newer one.
+concurrency:
+  group: release-image-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
-    name: Build, push, SBOM and sign
+    name: Build, sign, attest and publish
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,6 +43,7 @@ jobs:
       id-token: write   # keyless cosign signing
     env:
       IMAGE: ghcr.io/${{ github.repository_owner }}/icu-edge-gateway
+      IDENTITY: ^https://github.com/${{ github.repository }}/\.github/workflows/release-image\.yml@refs/(heads/main|tags/v.+)$
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -43,20 +58,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute tags
-        id: tags
-        run: |
-          ref="${GITHUB_REF_NAME//\//-}"
-          echo "list=${IMAGE}:${ref},${IMAGE}:sha-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
-
-      - name: Build and push
+      - name: Build and push (temporary per-run tag only)
         id: build
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: runtime
           push: true
-          tags: ${{ steps.tags.outputs.list }}
+          # A per-run tag nobody deploys from; the real tags are added only
+          # after signing and verification succeed (last step).
+          tags: ${{ env.IMAGE }}:build-${{ github.run_id }}-${{ github.run_attempt }}
           labels: |
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
@@ -81,12 +92,42 @@ jobs:
           cosign sign --yes "$REF"
           cosign attest --yes --type cyclonedx --predicate sbom.cdx.json "$REF"
 
-      - name: Verify signature
+      - name: Verify signature against this workflow's exact identity
         env:
           REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
         run: |
           cosign verify "$REF" \
-            --certificate-identity-regexp "https://github.com/${{ github.repository }}/" \
+            --certificate-identity-regexp "$IDENTITY" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             > /dev/null
-          echo "Signed and verified: $REF"
+          cosign verify-attestation "$REF" --type cyclonedx \
+            --certificate-identity-regexp "$IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            > /dev/null
+
+      - name: Publish tags (only after signing succeeded, only if still the head)
+        env:
+          REF: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          # A delayed, queued or re-run job for an older commit must not move
+          # the tag back: publish only if this commit is still the ref's head.
+          head=$(git ls-remote origin "$GITHUB_REF" | cut -f1)
+          if [ "$head" != "$GITHUB_SHA" ]; then
+            echo "::warning::$GITHUB_REF has moved to $head; not publishing tags for $GITHUB_SHA."
+            exit 0
+          fi
+          tag="${GITHUB_REF_NAME//\//-}"
+          # --prefer-index=false keeps the SIGNED manifest digest; without it a
+          # single-platform image would be wrapped in a new, unsigned index.
+          for t in "sha-${GITHUB_SHA}" "$tag"; do
+            docker buildx imagetools create --prefer-index=false --tag "${IMAGE}:${t}" "$REF"
+            got=$(docker buildx imagetools inspect "${IMAGE}:${t}" --format '{{json .Manifest.Digest}}' | tr -d '"')
+            [ "$got" = "$DIGEST" ] || { echo "::error::${t} resolves to ${got}, signed digest is ${DIGEST}"; exit 1; }
+          done
+          cosign verify "${IMAGE}:${tag}"             --certificate-identity-regexp "$IDENTITY"             --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+          {
+            echo "### Published"
+            echo "- Image: \`${IMAGE}:${tag}\`"
+            echo "- Digest: \`${{ steps.build.outputs.digest }}\` (pin this)"
+          } >> "$GITHUB_STEP_SUMMARY"

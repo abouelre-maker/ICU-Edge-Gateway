@@ -62,16 +62,24 @@ services:
   gateway:
     build:
       context: .
-    # HD-E7: labelled DEMONSTRATION staleness profile (not clinically validated).
-    env_file:
-      - deploy/profiles/news2-staleness.demo.env
     depends_on:
       ca-bundle-fetcher:
         condition: service_completed_successfully
     ports:
-      - "8000:8000"
-      - "2575:2575"
+      - "127.0.0.1:8000:8000"   # loopback only: remote clients go through the TLS proxy
+      - "127.0.0.1:2575:2575"
     environment:
+      # HD-E7: staleness windows. A value set in the host environment wins;
+      # otherwise the labelled DEMONSTRATION profile applies (not clinically
+      # validated; kept equal to deploy/profiles/news2-staleness.demo.env by
+      # tests/unit/test_demo_staleness_profile.py).
+      NEWS2_STALENESS_WINDOW_HEART_RATE_SECONDS: "${NEWS2_STALENESS_WINDOW_HEART_RATE_SECONDS:-300}"
+      NEWS2_STALENESS_WINDOW_SPO2_SECONDS: "${NEWS2_STALENESS_WINDOW_SPO2_SECONDS:-300}"
+      NEWS2_STALENESS_WINDOW_RESPIRATORY_RATE_SECONDS: "${NEWS2_STALENESS_WINDOW_RESPIRATORY_RATE_SECONDS:-300}"
+      NEWS2_STALENESS_WINDOW_SYSTOLIC_BP_SECONDS: "${NEWS2_STALENESS_WINDOW_SYSTOLIC_BP_SECONDS:-1800}"
+      NEWS2_STALENESS_WINDOW_SUPPLEMENTAL_O2_SECONDS: "${NEWS2_STALENESS_WINDOW_SUPPLEMENTAL_O2_SECONDS:-3600}"
+      NEWS2_STALENESS_WINDOW_TEMPERATURE_CELSIUS_SECONDS: "${NEWS2_STALENESS_WINDOW_TEMPERATURE_CELSIUS_SECONDS:-14400}"
+      NEWS2_STALENESS_WINDOW_CONSCIOUSNESS_SECONDS: "${NEWS2_STALENESS_WINDOW_CONSCIOUSNESS_SECONDS:-14400}"
       MLLP_ENABLED: "true"
       MLLP_HOST: "0.0.0.0"
       # F-01: MLLP peers outside this list are refused (default: loopback

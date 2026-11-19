@@ -5,11 +5,10 @@ owner's instruction. New IDs: HAZARD-SEC-001, HAZARD-SEC-002, REQ-API-011, REQ-S
 REQ-SEC-002. New hazards are unscored and still need the clinical safety reviewer (HD-E4).
 The list below is kept as the record of what was changed.
 
-The 2026-11-19 hardening changed behaviour that the controlled documents describe.
-Those documents (RMF-001, SRS-001, SAD-001, RTM-001) were **not edited**: changes to
-hazard records and requirements need the clinical safety reviewer (HD-E4). This list
-comes from a read-only SaMD safety review of the branch; every ID below exists in the
-cited document. No new ID has been invented — where one is needed, it says so.
+History: this list was first produced by a read-only SaMD safety review, while the
+controlled documents were still unedited. Every item below has since been applied (the
+"(new ID needed)" rows became HAZARD-SEC-001 and HAZARD-SEC-002). What remains open is
+scoring and ratification by the clinical safety reviewer (HD-E4), not editing.
 
 ## RMF-001 Risk Management File
 | Hazard | Location | Update needed |
