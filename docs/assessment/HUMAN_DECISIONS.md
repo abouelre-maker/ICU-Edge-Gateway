@@ -44,7 +44,22 @@ Each item: what is needed, options, recommendation, and what it blocks. Status i
 
 ### HD-E6 — BLOCKED-TEST-CONFLICT items
 - **Blocks:** each affected finding.
-- **Status:** OPEN — 5 entries (A2-1, A5-1, A5-2, A8-1, F03-1).
+- **Status:** OPEN — 6 entries (A2-1, A5-1, A5-2, A8-1, F03-1, F04-1).
+
+#### F04-1 — patient identifier (PHI) in the MQTT topic
+- **Tests:** `tests/unit/test_mqtt_publisher.py::…::test_builds_topic_from_prefix_and_patient_id` and
+  the trailing-slash variant (`assert pub.topic_for(_bundle_for_patient("PT-007")) == "icu-edge/vitals/PT-007"`),
+  plus the batch tests that match on topics such as `"icu-edge/vitals/PT-002"`.
+- **Behaviour it locks in:** the raw patient identifier is the last topic level, so it is
+  visible to the broker, its logs, ACLs and every subscriber of a wildcard.
+- **Why that is wrong:** an MQTT topic is metadata that is routinely logged and is not
+  covered by payload encryption; putting an MRN there leaks PHI (F-04).
+- **Now:** the identifier is validated (`[A-Za-z0-9._-]{1,64}`), unsafe ones are dead-lettered,
+  paho `ValueError` is dead-lettered — so the queue can no longer be halted — but the topic
+  still contains the identifier.
+- **Options:** (1) amend these tests to expect an opaque per-patient key (e.g. HMAC-SHA256 of
+  the identifier with a deployment secret `MQTT_TOPIC_KEY`, truncated hex) with the mapping kept
+  out of the topic — **recommended**; (2) keep identifiers in topics, WONTFIX, and rely on broker ACLs.
 
 #### F03-1 — oversized MLLP frame: close without ACK vs send AR
 - **Test:** `tests/integration/test_mllp_listener.py::TestOversizedFrameRejected::test_frame_exceeding_max_bytes_is_rejected`.

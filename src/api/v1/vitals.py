@@ -19,7 +19,11 @@ from typing import Any
 import structlog
 from config import get_max_waveform_samples
 from domain.entities.device_context import DeviceContext, MonitorVendor
-from domain.entities.patient_context import PatientContext, SpO2Scale
+from domain.entities.patient_context import (
+    PATIENT_ID_PATTERN,
+    PatientContext,
+    SpO2Scale,
+)
 from domain.entities.score_outcome import Finding, ReasonCode
 from domain.entities.vital_sign import (
     AVPULevel,
@@ -164,7 +168,12 @@ class VitalsIngestionRequest(BaseModel):
     patient_id: str = Field(
         ...,
         min_length=1,
-        description="FHIR Patient logical ID. Required for all FHIR resource references.",
+        max_length=64,
+        pattern=PATIENT_ID_PATTERN,
+        description=(
+            "FHIR Patient logical ID: 1-64 characters from [A-Za-z0-9._-] "
+            "(F-04: safe in FHIR references, logs and MQTT topics)."
+        ),
     )
     samples: list[VitalSignPayload] = Field(
         ...,

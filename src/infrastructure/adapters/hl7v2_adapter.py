@@ -44,6 +44,7 @@ from typing import Final
 
 import structlog
 from domain.entities.device_context import DeviceContext, MonitorVendor
+from domain.entities.patient_context import is_safe_patient_id
 from domain.entities.score_outcome import Finding, ReasonCode
 from domain.entities.vital_sign import (
     AVPULevel,
@@ -1090,10 +1091,10 @@ def _extract_patient_id_raw(
         )
         return "UNKNOWN"
     if len(parsed) == 1:
-        return parsed[0][0]
+        return _checked_id(parsed[0][0], findings)
     mrs = [i for i, t in parsed if t == "MR"]
     if len(mrs) == 1:
-        return mrs[0]
+        return _checked_id(mrs[0], findings)
     warnings.append(
         f"[PID-AMBIGUOUS] {len(parsed)} PID-3 identifiers and no single MR-typed one."
     )
@@ -1105,6 +1106,20 @@ def _extract_patient_id_raw(
         )
     )
     return parsed[0][0]
+
+
+def _checked_id(patient_id: str, findings: list[Finding]) -> str:
+    """F-04: an identifier outside [A-Za-z0-9._-]{1,64} cannot be scored or routed."""
+    if not is_safe_patient_id(patient_id):
+        findings.append(
+            Finding(
+                ReasonCode.AMBIGUOUS_PATIENT_ID,
+                None,
+                "Patient identifier contains characters outside [A-Za-z0-9._-] "
+                "or exceeds 64 characters.",
+            )
+        )
+    return patient_id
 
 
 def _apply_corrections(samples: list[VitalSignSample]) -> list[VitalSignSample]:
