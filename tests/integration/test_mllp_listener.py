@@ -94,8 +94,11 @@ class TestValidFrameAccepted:
         self, listener: MLLPListener
     ) -> None:
         reader, writer = await _connect(listener)
-        for _ in range(3):
-            writer.write(_mllp_frame(FULL_ORU))
+        # A8-1 (HD-E6 option 1, approved 2026-11-19): three DISTINCT messages
+        # (was three copies of MSG001, which locked in duplicate processing;
+        # retransmissions are covered by tests/integration/test_a8_mllp_dedup.py).
+        for i in range(3):
+            writer.write(_mllp_frame(FULL_ORU.replace("|MSG001|", f"|MSG00{i + 1}|")))
             await writer.drain()
             resp = await asyncio.wait_for(
                 reader.readuntil(_END_BLOCK + _CARRIAGE_RETURN), timeout=5
@@ -158,9 +161,10 @@ class TestOversizedFrameRejected:
             reader, writer = await _connect(listener)
             writer.write(_mllp_frame(FULL_ORU))  # well over 64 bytes
             await writer.drain()
-            # Listener closes the connection rather than ACKing an oversized frame.
+            # F03-1 (HD-E6 option 1, approved 2026-11-19): was "closed with
+            # no ACK". The listener now answers AR, then closes.
             data = await asyncio.wait_for(reader.read(), timeout=5)
-            assert data == b""  # connection closed with no ACK sent
+            assert b"MSA|AR|" in data
             assert buf.size() == 0
         finally:
             await listener.stop()

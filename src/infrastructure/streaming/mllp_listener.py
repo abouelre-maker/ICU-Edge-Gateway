@@ -49,6 +49,7 @@ sign-off; new hazard for new code, not a resolution of an existing one):
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import ipaddress
 import re
@@ -108,8 +109,26 @@ def _raw_control_id(raw: str) -> str:
     return m.group(1).strip() if m else ""
 
 
+# A8-1: (MSH-3 sending application, MSH-4 sending facility, MSH-10 control ID).
+_MSH_SENDER_AND_ID = re.compile(r"^MSH\|[^|\r]*\|([^|\r]*)\|([^|\r]*)\|(?:[^|\r]*\|){5}([^|\r]*)")
+_DEFAULT_DEDUP_CAPACITY = 10_000
+_DISCARD_SECONDS = 2.0
+
+
+def _dedup_key(frame: bytes) -> tuple[str, str, str] | None:
+    """Idempotency key of a frame, or None when it has no MSH-10 to key on."""
+    m = _MSH_SENDER_AND_ID.match(frame.decode("utf-8", errors="replace").lstrip())
+    if not m or not m.group(3).strip():
+        return None
+    return (m.group(1).strip(), m.group(2).strip(), m.group(3).strip())
+
+
 class MLLPFramingError(ValueError):
     """Raised for a structurally invalid MLLP frame (HAZARD-STREAM-001)."""
+
+
+class MLLPOversizeError(MLLPFramingError):
+    """F-03 / F03-1: a frame over the byte cap. Answered with AR, then closed."""
 
 
 class MLLPListener:
@@ -137,7 +156,7 @@ class MLLPListener:
         # also always overridden by config.get_mllp_host() at the actual
         # construction site (main.py), itself overridable via MLLP_HOST
         # for deployments that need to narrow this.
-        host: str = "0.0.0.0",  # nosec B104
+        host: str = "127.0.0.1",
         port: int = 2575,
         forward_buffer: StoreAndForwardRingBuffer[dict[str, Any]] | None = None,
         adapter: HL7v2Adapter | None = None,
@@ -152,6 +171,7 @@ class MLLPListener:
         idle_timeout_seconds: float = _DEFAULT_IDLE_TIMEOUT_SECONDS,
         max_connections: int = _DEFAULT_MAX_CONNECTIONS,
         allowed_networks: tuple[str, ...] = ("127.0.0.0/8", "::1/128"),
+        dedup_capacity: int = _DEFAULT_DEDUP_CAPACITY,
     ) -> None:
         self._host = host
         self._port = port
@@ -179,6 +199,15 @@ class MLLPListener:
         self._max_connections = max_connections
         self._active_connections = 0
         self._handler_tasks: set[asyncio.Task[None]] = set()
+        # A8-1: keys of recently ACCEPTED messages. A retransmission (same
+        # sender + MSH-10, e.g. after a lost ACK) is acknowledged AA again but
+        # not re-processed, so one observation never becomes several records.
+        # ponytail: in-memory LRU, lost on restart; a durable store comes with
+        # the durable forward queue (A8 known gap).
+        self._accepted_keys: collections.OrderedDict[tuple[str, str, str], None] = (
+            collections.OrderedDict()
+        )
+        self._dedup_capacity = dedup_capacity
         # F-01: IP allow-list. Default loopback only; config.get_mllp_allowed_networks().
         self._allowed_networks = tuple(
             ipaddress.ip_network(n, strict=False) for n in allowed_networks
@@ -256,16 +285,56 @@ class MLLPListener:
                 frame = await self._read_frame(reader, log)
                 if frame is None:
                     break  # clean EOF between messages
-                # F-02: parsing / DSP / NEWS2 / FHIR assembly run in a worker
-                # thread; only the cheap publish step touches the event loop.
-                outcome = await asyncio.get_running_loop().run_in_executor(
-                    None, self._process_frame, frame, log
-                )
-                if outcome.accepted and outcome.bundle is not None:
-                    self._publish(outcome.bundle, log)
+                key = _dedup_key(frame)
+                if key is not None and key in self._accepted_keys:
+                    # A8-1: retransmission of an accepted message.
+                    self._accepted_keys.move_to_end(key)
+                    log.info("mllp_listener.frame.duplicate_not_reprocessed")
+                    outcome = MLLPIngestOutcome(
+                        accepted=True,
+                        patient_id=None,
+                        reason="Duplicate of an accepted message; not re-processed.",
+                        bundle=None,
+                        ack_code="AA",
+                        control_id=key[2],
+                    )
+                else:
+                    # F-02: parsing / DSP / NEWS2 / FHIR assembly run in a worker
+                    # thread; only the cheap publish step touches the event loop.
+                    outcome = await asyncio.get_running_loop().run_in_executor(
+                        None, self._process_frame, frame, log
+                    )
+                    if outcome.accepted and outcome.bundle is not None:
+                        self._publish(outcome.bundle, log)
+                        if key is not None:
+                            self._remember_accepted(key)
                 ack = self._build_ack(outcome)
                 writer.write(_START_BLOCK + ack.encode("utf-8") + _FRAME_TERMINATOR)
                 await writer.drain()
+        except MLLPOversizeError as exc:
+            # F03-1 (HD-E6 option 1, approved 2026-11-19): tell the sender the
+            # message was refused (AR) instead of a silent close it would
+            # simply retransmit into. The stream position is unknown after an
+            # overrun, so the connection is closed after the AR.
+            log.warning("mllp_listener.connection.oversize_frame", error=str(exc))
+            ack = self._build_ack(
+                MLLPIngestOutcome(
+                    accepted=False,
+                    patient_id=None,
+                    reason="Frame exceeds the maximum size; message refused.",
+                    bundle=None,
+                    ack_code="AR",
+                )
+            )
+            with contextlib.suppress(Exception):
+                writer.write(_START_BLOCK + ack.encode("utf-8") + _FRAME_TERMINATOR)
+                await writer.drain()
+                if writer.can_write_eof():
+                    writer.write_eof()
+                # Closing with unread inbound bytes makes the OS send RST, which
+                # can destroy the AR before the sender reads it. Discard what is
+                # left of the oversized frame first, bounded in time and bytes.
+                await self._discard_input(reader)
         except MLLPFramingError as exc:
             log.warning("mllp_listener.connection.framing_error", error=str(exc))
         except asyncio.IncompleteReadError:
@@ -282,6 +351,29 @@ class MLLPListener:
             with contextlib.suppress(Exception):
                 await writer.wait_closed()
             log.info("mllp_listener.connection.close")
+
+    async def _discard_input(self, reader: asyncio.StreamReader) -> None:
+        """Drain at most max(4x the frame cap, 1 MiB) or 2 s of input, whichever first."""
+        budget = max(4 * self._max_frame_bytes, 1 << 20)
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _DISCARD_SECONDS
+        while budget > 0:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return
+            try:
+                chunk = await asyncio.wait_for(reader.read(65536), timeout=remaining)
+            except (TimeoutError, ConnectionError):
+                return
+            if not chunk:
+                return
+            budget -= len(chunk)
+
+    def _remember_accepted(self, key: tuple[str, str, str]) -> None:
+        self._accepted_keys[key] = None
+        self._accepted_keys.move_to_end(key)
+        while len(self._accepted_keys) > self._dedup_capacity:
+            self._accepted_keys.popitem(last=False)
 
     def _peer_allowed(self, peer: Any) -> bool:
         try:
@@ -323,16 +415,15 @@ class MLLPListener:
                 reader.readuntil(_FRAME_TERMINATOR), timeout=self._frame_timeout
             )
         except asyncio.LimitOverrunError as exc:
-            # F-03: handled explicitly (was an unhandled exception + reset).
-            # The connection is closed without an ACK — the existing test
-            # contract; sending AR instead is BLOCKED-TEST-CONFLICT F03-1.
-            raise MLLPFramingError(
+            # F-03: handled explicitly (was an unhandled exception + reset);
+            # F03-1: answered with AR before the connection is closed.
+            raise MLLPOversizeError(
                 f"MLLP frame exceeds the {self._max_frame_bytes}-byte maximum "
                 "(HAZARD-STREAM-001)."
             ) from exc
 
         if len(body_and_terminator) > self._max_frame_bytes:
-            raise MLLPFramingError(
+            raise MLLPOversizeError(
                 f"MLLP frame of {len(body_and_terminator)} bytes exceeds the "
                 f"{self._max_frame_bytes}-byte maximum (HAZARD-STREAM-001)."
             )

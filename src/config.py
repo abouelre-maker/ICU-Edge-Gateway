@@ -24,12 +24,15 @@ def get_mllp_enabled() -> bool:
 
 
 def get_mllp_host() -> str:
-    """MLLP_HOST (default: 0.0.0.0 — edge appliance listens for LAN-side monitors)."""
-    # Bandit B104 (hardcoded_bind_all_interfaces): intentional -- this is an
-    # edge appliance that must accept MLLP connections from any bedside
-    # monitor on the ICU LAN, not a single known peer. Overridable via
-    # MLLP_HOST for deployments that want to narrow this.
-    return os.getenv("MLLP_HOST", "0.0.0.0")  # nosec B104
+    """
+    MLLP_HOST (default: 127.0.0.1).
+
+    F01-2 (HD-E6 option 1, approved 2026-11-19): loopback by default. An edge
+    appliance that must accept bedside monitors on the ICU LAN sets
+    MLLP_HOST explicitly (e.g. the LAN interface, or 0.0.0.0) together with
+    MLLP_ALLOWED_CLIENTS, so wide exposure is always a deliberate choice.
+    """
+    return os.getenv("MLLP_HOST", "127.0.0.1")
 
 
 def get_mllp_port() -> int:
@@ -424,6 +427,21 @@ def validate_gateway_auth_config() -> None:
             f"GATEWAY_API_KEYS entries {short} are shorter than "
             f"{_MIN_API_KEY_LENGTH} characters (F-01)."
         )
+
+
+def get_mqtt_topic_key() -> bytes:
+    """
+    MQTT_TOPIC_KEY (F-04): secret for the opaque per-patient MQTT topic
+    segment. Required (>= 32 characters) whenever MQTT is enabled; the
+    gateway refuses to start without it rather than put identifiers in topics.
+    """
+    raw = os.getenv("MQTT_TOPIC_KEY", "")
+    if len(raw) < _MIN_API_KEY_LENGTH:
+        raise RuntimeError(
+            "MQTT_TOPIC_KEY must be set to at least "
+            f"{_MIN_API_KEY_LENGTH} characters when MQTT is enabled (F-04)."
+        )
+    return raw.encode("utf-8")
 
 
 def get_mllp_allowed_networks() -> tuple[str, ...]:

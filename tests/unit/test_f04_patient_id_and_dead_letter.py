@@ -18,8 +18,11 @@ import pytest
 from domain.entities.score_outcome import ReasonCode
 from httpx import AsyncClient
 from infrastructure.adapters.hl7v2_adapter import HL7v2Adapter
-from infrastructure.streaming.mqtt_publisher import MQTTPublisher
+from infrastructure.streaming.mqtt_publisher import MQTTPublisher, opaque_topic_segment
 from infrastructure.streaming.ring_buffer import StoreAndForwardRingBuffer
+
+# F04-1 (approved 2026-11-19): topics are opaque; tests use a fixed key.
+_TOPIC_KEY = b"test-only-topic-key-for-unit-tests-000"
 
 
 def _payload(pid: str) -> dict[str, object]:
@@ -85,7 +88,7 @@ class _Client:
 
 def _pub(client: _Client) -> MQTTPublisher:
     buf: StoreAndForwardRingBuffer[dict[str, Any]] = StoreAndForwardRingBuffer(capacity=10)
-    pub = MQTTPublisher(buffer=buf, broker_host="127.0.0.1", qos=1)
+    pub = MQTTPublisher(buffer=buf, broker_host="127.0.0.1", qos=1, topic_key=_TOPIC_KEY)
     pub._client = client  # type: ignore[assignment]
     return pub
 
@@ -95,14 +98,14 @@ def test_unsafe_patient_id_is_dead_lettered_not_requeued() -> None:
     pub = _pub(client)
     unpublished = pub._publish_batch_sync([_bundle("a+b#c"), _bundle("PT-OK")])
     assert unpublished == []  # nothing requeued → queue keeps draining
-    assert client.published == ["icu-edge/vitals/PT-OK"]
+    assert client.published == [f"icu-edge/vitals/{opaque_topic_segment('PT-OK', _TOPIC_KEY)}"]
     assert pub.dead_letter_count == 1
 
 
 def test_paho_value_error_is_dead_lettered_not_requeued() -> None:
-    client = _Client(raise_value_error_on="PT-BAD")
+    client = _Client(raise_value_error_on=opaque_topic_segment("PT-BAD", _TOPIC_KEY))
     pub = _pub(client)
     unpublished = pub._publish_batch_sync([_bundle("PT-BAD"), _bundle("PT-OK")])
     assert unpublished == []
-    assert client.published == ["icu-edge/vitals/PT-OK"]
+    assert client.published == [f"icu-edge/vitals/{opaque_topic_segment('PT-OK', _TOPIC_KEY)}"]
     assert pub.dead_letter_count == 1

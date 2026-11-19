@@ -61,7 +61,10 @@ import asyncio
 import collections
 import contextlib
 import functools
+import hashlib
+import hmac
 import json
+import secrets
 from typing import Any
 
 import paho.mqtt.client as mqtt
@@ -83,6 +86,19 @@ _DEAD_LETTER_CAPACITY = 1000  # F-04: bounded; oldest dropped first
 # shared infrastructure/streaming/fhir_bundle_utils.py module so
 # LiveDashboardChannel can reuse the same logic instead of duplicating it.
 _extract_patient_id = extract_patient_id
+
+# F-04: an MQTT topic is metadata: brokers log it, ACLs and wildcard
+# subscribers see it, payload encryption does not cover it. The topic carries
+# an opaque per-patient segment, HMAC-SHA256(MQTT_TOPIC_KEY, patient id)
+# truncated to 128 bits, never the identifier itself. Consumers demultiplex on
+# the Bundle (TLS-protected payload), which still names the patient.
+_TOPIC_SEGMENT_HEX = 32
+
+
+def opaque_topic_segment(patient_id: str, key: bytes) -> str:
+    """Stable, non-reversible topic segment for one patient under one key."""
+    digest = hmac.new(key, patient_id.encode("utf-8"), hashlib.sha256).hexdigest()
+    return digest[:_TOPIC_SEGMENT_HEX]
 
 
 class MQTTPublisher:
@@ -111,6 +127,7 @@ class MQTTPublisher:
         drain_batch_size: int = 50,
         retry_backoff_seconds: float = _DEFAULT_RETRY_BACKOFF_SECONDS,
         publish_timeout_seconds: float = _DEFAULT_PUBLISH_TIMEOUT_SECONDS,
+        topic_key: bytes | None = None,
     ) -> None:
         if qos not in (0, 1, 2):
             raise ValueError(f"qos must be 0, 1, or 2 per the MQTT spec. Got {qos!r}.")
@@ -119,6 +136,10 @@ class MQTTPublisher:
         self._broker_host = broker_host
         self._broker_port = broker_port
         self._topic_prefix = topic_prefix.rstrip("/")
+        # F-04: without a configured key a random per-process key is used:
+        # topics stay opaque but change on restart. Production supplies
+        # MQTT_TOPIC_KEY (config.get_mqtt_config refuses to start without it).
+        self._topic_key = topic_key if topic_key else secrets.token_bytes(32)
         self._client_id = client_id
         self._use_tls = use_tls
         self._qos = qos
@@ -157,7 +178,7 @@ class MQTTPublisher:
 
     def topic_for(self, bundle: dict[str, Any]) -> str:
         patient_id = _extract_patient_id(bundle)
-        return f"{self._topic_prefix}/{patient_id}"
+        return f"{self._topic_prefix}/{opaque_topic_segment(patient_id, self._topic_key)}"
 
     async def start(self) -> None:
         client = mqtt.Client(

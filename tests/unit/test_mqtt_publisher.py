@@ -17,8 +17,20 @@ from typing import Any
 
 import paho.mqtt.client as mqtt
 import pytest
-from infrastructure.streaming.mqtt_publisher import MQTTPublisher, _extract_patient_id
+from infrastructure.streaming.mqtt_publisher import (
+    MQTTPublisher,
+    _extract_patient_id,
+    opaque_topic_segment,
+)
 from infrastructure.streaming.ring_buffer import StoreAndForwardRingBuffer
+
+# F04-1 (HD-E6 option 1, approved 2026-11-19): topics carry an opaque
+# per-patient segment, never the identifier. Tests use a fixed test key.
+_TOPIC_KEY = b"test-only-topic-key-for-unit-tests-000"
+
+
+def _topic(patient_id: str, prefix: str = "icu-edge/vitals") -> str:
+    return f"{prefix}/{opaque_topic_segment(patient_id, _TOPIC_KEY)}"
 
 
 def _bundle_for_patient(patient_id: str) -> dict[str, Any]:
@@ -62,18 +74,26 @@ class TestTopicFor:
             capacity=10
         )
         pub = MQTTPublisher(
-            buffer=buf, broker_host="127.0.0.1", topic_prefix="icu-edge/vitals"
+            buffer=buf,
+            broker_host="127.0.0.1",
+            topic_prefix="icu-edge/vitals",
+            topic_key=_TOPIC_KEY,
         )
-        assert pub.topic_for(_bundle_for_patient("PT-007")) == "icu-edge/vitals/PT-007"
+        topic = pub.topic_for(_bundle_for_patient("PT-007"))
+        assert topic == _topic("PT-007")
+        assert "PT-007" not in topic  # F-04: no identifier in the topic
 
     def test_strips_trailing_slash_from_configured_prefix(self) -> None:
         buf: StoreAndForwardRingBuffer[dict[str, Any]] = StoreAndForwardRingBuffer(
             capacity=10
         )
         pub = MQTTPublisher(
-            buffer=buf, broker_host="127.0.0.1", topic_prefix="icu-edge/vitals/"
+            buffer=buf,
+            broker_host="127.0.0.1",
+            topic_prefix="icu-edge/vitals/",
+            topic_key=_TOPIC_KEY,
         )
-        assert pub.topic_for(_bundle_for_patient("PT-007")) == "icu-edge/vitals/PT-007"
+        assert pub.topic_for(_bundle_for_patient("PT-007")) == _topic("PT-007")
 
 
 class TestConstructorValidation:
@@ -114,6 +134,7 @@ def _publisher_with_fake_client(
     buf: StoreAndForwardRingBuffer[dict[str, Any]] = StoreAndForwardRingBuffer(
         capacity=100
     )
+    kwargs.setdefault("topic_key", _TOPIC_KEY)
     pub = MQTTPublisher(buffer=buf, broker_host="127.0.0.1", qos=1, **kwargs)
     fake = _FakeMQTTClient(fail_on_topics=fail_on_topics)
     pub._client = fake  # type: ignore[assignment]  # bypass start(); no real broker in tests
@@ -132,7 +153,7 @@ class TestPublishBatchSync:
 
     def test_first_failure_stops_batch_and_returns_remainder_in_order(self) -> None:
         pub, _, fake = _publisher_with_fake_client(
-            fail_on_topics={"icu-edge/vitals/PT-002"}
+            fail_on_topics={_topic("PT-002")}
         )
         batch = [
             _bundle_for_patient("PT-001"),
@@ -206,8 +227,8 @@ class TestHazardDsp007NonFiniteBundleNeverPublished:
         assert unpublished == []
         published_topics = {topic for topic, _, _ in fake.published}
         assert published_topics == {
-            "icu-edge/vitals/PT-001",
-            "icu-edge/vitals/PT-003",
+            _topic("PT-001"),
+            _topic("PT-003"),
         }
 
 
@@ -232,7 +253,7 @@ async def _wait_until(
 class TestRunLoopRequeueOnFailure:
     async def test_failed_item_is_requeued_not_dropped(self) -> None:
         pub, buf, _fake = _publisher_with_fake_client(
-            fail_on_topics={"icu-edge/vitals/PT-999"},
+            fail_on_topics={_topic("PT-999")},
             # A generous retry backoff means the buffer spends most of its
             # time settled (post-requeue) rather than mid-cycle, so sampling
             # it after the first cycle completes is not a race.

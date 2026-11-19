@@ -71,6 +71,9 @@ services:
     environment:
       MLLP_ENABLED: "true"
       MLLP_HOST: "0.0.0.0"
+      # F-01: MLLP peers outside this list are refused (default: loopback
+      # only). The simulator reaches the gateway over the compose network.
+      MLLP_ALLOWED_CLIENTS: "172.16.0.0/12,192.168.0.0/16,10.0.0.0/8"
       MLLP_PORT: "2575"
       PROVISIONING_ENABLED: "true"
       PROVISIONING_BOOTSTRAP_URL: "https://mock-control-plane:8443"

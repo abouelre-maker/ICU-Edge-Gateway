@@ -34,6 +34,7 @@ from config import (
     get_mllp_port,
     get_mqtt_config,
     get_mqtt_enabled,
+    get_mqtt_topic_key,
     get_provisioning_bootstrap_url,
     get_provisioning_ca_bundle_path,
     get_provisioning_enabled,
@@ -153,6 +154,7 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
             password=mqtt_config.password,
             publish_interval_seconds=mqtt_config.publish_interval_seconds,
             drain_batch_size=mqtt_config.drain_batch_size,
+            topic_key=get_mqtt_topic_key(),
         )
         await publisher.start()
         app.state.mqtt_publisher = publisher

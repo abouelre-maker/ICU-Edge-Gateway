@@ -110,3 +110,10 @@ def _default_test_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
         original_init(self, *args, **kwargs)
 
     monkeypatch.setattr(TestClient, "__init__", _init)
+
+
+# ── Test-only MQTT topic key (F04-1; HD-E6 option 1 approved 2026-11-19) ─────
+# APPEND-ONLY block. With MQTT enabled the gateway refuses to start without
+# MQTT_TOPIC_KEY (opaque per-patient topics). TEST value, not a secret.
+TEST_MQTT_TOPIC_KEY = "test-only-mqtt-topic-key-not-a-secret-00001"
+_os.environ.setdefault("MQTT_TOPIC_KEY", TEST_MQTT_TOPIC_KEY)
