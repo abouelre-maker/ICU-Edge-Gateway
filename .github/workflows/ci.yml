@@ -250,8 +250,15 @@ jobs:
           curl -s -m 3 http://127.0.0.1/ >/dev/null 2>&1 \
             && { echo "::error::port 80 is listening"; exit 1; } || echo "no port 80 listener"
 
-          if echo | timeout 5 openssl s_client -connect 127.0.0.1:2576 -quiet 2>&1 | grep -qiE "alert|certificate required|handshake failure|errno"; then
-            echo "MLLP without client certificate refused"
-          else
+          # TLS 1.2: a missing client certificate fails the handshake itself,
+          # so openssl's exit status is the verdict.
+          if timeout 5 openssl s_client -tls1_2 -connect 127.0.0.1:2576 </dev/null >/dev/null 2>&1; then
             echo "::error::MLLP accepted a client without a certificate"; exit 1
           fi
+          echo "MLLP without client certificate refused"
+          # Positive control: a certificate trusted by the monitor CA gets through.
+          if ! timeout 5 openssl s_client -tls1_2 -connect 127.0.0.1:2576 \
+               -cert tls/gateway.crt -key tls/gateway.key </dev/null >/dev/null 2>&1; then
+            echo "::error::MLLP refused a client with a valid certificate"; exit 1
+          fi
+          echo "MLLP with a valid client certificate accepted"
