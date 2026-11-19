@@ -44,7 +44,20 @@ Each item: what is needed, options, recommendation, and what it blocks. Status i
 
 ### HD-E6 — BLOCKED-TEST-CONFLICT items
 - **Blocks:** each affected finding.
-- **Status:** OPEN — 3 entries (A2-1, A5-1, A5-2).
+- **Status:** OPEN — 4 entries (A2-1, A5-1, A5-2, A8-1).
+
+#### A8-1 — MLLP idempotency (duplicate MSH-10 re-processed)
+- **Test:** `tests/integration/test_mllp_listener.py::TestValidFrameAccepted::test_multiple_frames_on_one_persistent_connection`.
+- **Assertion locked in:** the identical message (MSH-10 `MSG001`) sent three times ⇒
+  `assert listener.forward_buffer.size() == 3`.
+- **Behaviour it locks in:** retransmissions of the same message are processed and forwarded
+  again, so downstream receives duplicates.
+- **Why that is wrong:** MLLP senders retransmit when an ACK is lost; without de-duplication by
+  (sender, MSH-10), one observation becomes several downstream records (A8).
+- **Options:** (1) amend the test to send three distinct MSH-10 values (and add a test that a
+  repeated MSH-10 is ACKed AA without re-forwarding) — **recommended**; (2) keep re-processing,
+  WONTFIX (duplicates handled downstream).
+- **State now:** de-duplication **not implemented**; the rest of A8 is implemented.
 
 #### A5-1 — site-unspecified `T1`/`T2` mapped to core temperature
 - **Tests (5):** `tests/unit/test_demo_streamer.py::TestEveryEmittedObxCodeIsAlreadyMapped::test_no_obx_is_skipped_for_any_stage_of_any_bed[ICU-BED-03]`,

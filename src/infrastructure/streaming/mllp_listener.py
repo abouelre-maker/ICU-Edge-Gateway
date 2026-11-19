@@ -50,6 +50,9 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
+import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -85,6 +88,19 @@ class MLLPIngestOutcome:
     patient_id: str | None
     reason: str | None
     bundle: dict[str, Any] | None
+    # A8: explicit acknowledgement code (AA/AE/AR) and the sender's MSH-10.
+    ack_code: str = ""
+    control_id: str = ""
+
+
+# A8: MSH-10 of an inbound frame, for echoing in MSA-2 even when the message
+# cannot be parsed. MSH|<enc>|3|4|5|6|7|8|9|10 → seven fields after MSH-2.
+_MSH10 = re.compile(r"^MSH\|[^|\r]*\|(?:[^|\r]*\|){7}([^|\r]*)")
+
+
+def _raw_control_id(raw: str) -> str:
+    m = _MSH10.match(raw.lstrip())
+    return m.group(1).strip() if m else ""
 
 
 class MLLPFramingError(ValueError):
@@ -126,6 +142,7 @@ class MLLPListener:
         max_frame_bytes: int = _DEFAULT_MAX_FRAME_BYTES,
         live_channel: LiveDashboardChannel | None = None,
         subscription_dispatcher: SubscriptionDispatcher | None = None,
+        spo2_scale_resolver: Callable[[str], SpO2Scale | None] | None = None,
     ) -> None:
         self._host = host
         self._port = port
@@ -137,6 +154,9 @@ class MLLPListener:
         self._orchestrator = orchestrator or VitalsOrchestrator()
         self._assembler = assembler or BundleAssembler()
         self._default_spo2_scale = default_spo2_scale
+        # A8: per-patient SpO2 scale (e.g. from a clinician-maintained registry).
+        # None / unknown patient ⇒ default_spo2_scale (same as HTTP /ingest).
+        self._spo2_scale_resolver = spo2_scale_resolver
         self._max_frame_bytes = max_frame_bytes
         # Optional: Phase 5 Section A live dashboard fan-out / FHIR
         # Subscription dispatch. None is a fully supported configuration
@@ -248,6 +268,18 @@ class MLLPListener:
                 patient_id=None,
                 reason=f"Undecodable frame: {exc}",
                 bundle=None,
+                ack_code="AR",
+            )
+
+        control_id = _raw_control_id(raw_hl7)
+        if raw_hl7.lstrip().startswith(("FHS", "BHS")):
+            # A8: batch envelopes are not supported — rejected explicitly.
+            return MLLPIngestOutcome(
+                accepted=False,
+                patient_id=None,
+                reason="HL7 batch (FHS/BHS) not supported; send single messages.",
+                bundle=None,
+                ack_code="AR",
             )
 
         try:
@@ -255,12 +287,45 @@ class MLLPListener:
         except ValueError as exc:
             log.warning("mllp_listener.frame.parse_error", error=str(exc))
             return MLLPIngestOutcome(
-                accepted=False, patient_id=None, reason=str(exc), bundle=None
+                accepted=False,
+                patient_id=None,
+                reason=str(exc),
+                bundle=None,
+                ack_code="AE",
+                control_id=control_id,
+            )
+        control_id = parse_result.message_control_id or control_id
+
+        if parse_result.message_type != "ORU^R01":
+            return MLLPIngestOutcome(
+                accepted=False,
+                patient_id=None,
+                reason=(
+                    f"Message type '{parse_result.message_type or 'absent'}' "
+                    "not supported; only ORU^R01."
+                ),
+                bundle=None,
+                ack_code="AR",
+                control_id=control_id,
+            )
+        if not parse_result.samples:
+            return MLLPIngestOutcome(
+                accepted=False,
+                patient_id=None,
+                reason="No usable observation in message.",
+                bundle=None,
+                ack_code="AE",
+                control_id=control_id,
             )
 
+        scale = (
+            self._spo2_scale_resolver(parse_result.patient_id)
+            if self._spo2_scale_resolver is not None
+            else None
+        )
         patient_context = PatientContext(
             patient_id=parse_result.patient_id,
-            spo2_scale=self._default_spo2_scale,
+            spo2_scale=scale or self._default_spo2_scale,
         )
         device_context: DeviceContext | None = None
         if parse_result.detected_vendor is not MonitorVendor.GENERIC:
@@ -310,6 +375,8 @@ class MLLPListener:
             patient_id=parse_result.patient_id,
             reason=None,
             bundle=bundle,
+            ack_code="AA",
+            control_id=control_id,
         )
 
     @staticmethod
@@ -317,16 +384,19 @@ class MLLPListener:
         """
         Build an HL7 v2.x ACK/NAK message per MSA acknowledgement conventions.
 
-        AA = Application Accept, AE = Application Error. This listener never
-        raises AR (Application Reject) — every structurally-parseable frame
-        is either fully accepted or explicitly rejected with a reason.
+        A8: AA = accepted (into the volatile store-and-forward buffer — see
+        known gap: not a durable store), AE = application error (unparseable,
+        or no usable observation), AR = application reject (undecodable frame,
+        unsupported message type, batch envelope). MSA-2 echoes the sender's
+        MSH-10. The ACK's own MSH-10 is unique (not second-resolution).
         """
         ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        ack_code = "AA" if outcome.accepted else "AE"
-        control_id = f"ACK{ts}"
+        ack_code = outcome.ack_code or ("AA" if outcome.accepted else "AE")
+        own_id = f"ACK{uuid.uuid4().hex[:17].upper()}"
+        echo = outcome.control_id.replace("|", "-").replace("\r", " ")
         detail = (outcome.reason or "").replace("|", "-").replace("\r", " ")
         segments = [
-            f"MSH|^~\\&|ICU-EDGE-GATEWAY|EDGE|||{ts}||ACK|{control_id}|P|2.5.1",
-            f"MSA|{ack_code}|{control_id}|{detail}",
+            f"MSH|^~\\&|ICU-EDGE-GATEWAY|EDGE|||{ts}||ACK|{own_id}|P|2.5.1",
+            f"MSA|{ack_code}|{echo}|{detail}",
         ]
         return "\r".join(segments) + "\r"
