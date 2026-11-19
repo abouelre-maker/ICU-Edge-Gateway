@@ -32,6 +32,7 @@ from config import (
     get_provisioning_ca_bundle_path,
     get_provisioning_enabled,
     get_reattestation_interval_seconds,
+    validate_news2_scoring_config,
 )
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -92,6 +93,8 @@ async def lifespan(app: FastAPI):  # type: ignore[type-arg]
     awaited (not abandoned) on shutdown. Disabled by default, same
     opt-in convention as MLLP/MQTT.
     """
+    # A2 / decision Q1(b): refuse to start without staleness windows.
+    validate_news2_scoring_config()
     app.state.start_time = time.monotonic()
     app.state.forward_buffer = StoreAndForwardRingBuffer(
         capacity=_FORWARD_BUFFER_CAPACITY

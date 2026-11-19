@@ -213,7 +213,8 @@ class HL7ParseResult:
         samples:            Parsed VitalSignSample objects (one per valid OBX).
         patient_id:         Extracted from PID-3; "UNKNOWN" if absent.
         detected_vendor:    MonitorVendor from MSH-3 or device_context.
-        message_timestamp:  MSH-7 timestamp (UTC); now() if absent.
+        message_timestamp:  MSH-7 timestamp (UTC); None if absent or unparseable
+                            (A2 / N-03: never replaced by now()).
         skipped_obx_count:  OBX segments skipped due to unknown type or error.
         parse_warnings:     Ordered audit log from parsing.
         findings:           Machine-readable reason codes (Phase 1 contract).
@@ -222,7 +223,7 @@ class HL7ParseResult:
     samples: tuple[VitalSignSample, ...]
     patient_id: str
     detected_vendor: MonitorVendor
-    message_timestamp: datetime
+    message_timestamp: datetime | None
     skipped_obx_count: int
     parse_warnings: tuple[str, ...]
     findings: tuple[Finding, ...] = ()
@@ -376,15 +377,20 @@ class HL7v2Adapter:
         )
         return "UNKNOWN"
 
-    def _extract_message_timestamp(self, msg: object) -> datetime:
-        """Extract MSH-7 (Date/Time of Message). Defaults to UTC now."""
+    def _extract_message_timestamp(self, msg: object) -> datetime | None:
+        """
+        Extract MSH-7 (Date/Time of Message).
+
+        A2 / N-03: returns None when MSH-7 is absent or unparseable. It is never
+        replaced by the current time — that would make corrupt data look fresh.
+        """
         for child in msg.children:  # type: ignore[attr-defined]
             if getattr(child, "name", "").upper() == "MSH":
                 ts_str = _safe_field(child, "msh_7")
                 if ts_str:
-                    return _parse_hl7_datetime(ts_str)
+                    return _parse_hl7_datetime_strict(ts_str)
                 break
-        return datetime.now(tz=timezone.utc)
+        return None
 
     # ── Private: OBX Segment Parsing ──────────────────────────────────────────
 
@@ -394,7 +400,7 @@ class HL7v2Adapter:
         vendor: MonitorVendor,
         device_id: str,
         patient_id: str,  # noqa: ARG002  # reserved for future subject reference
-        msg_timestamp: datetime,
+        msg_timestamp: datetime | None,
         warnings: list[str],
         findings: list[Finding] | None = None,
     ) -> VitalSignSample | None:
@@ -432,12 +438,17 @@ class HL7v2Adapter:
         # continuous waveform data and are routed to the dedicated builder.
         value_type = _safe_field(obx, "obx_2").upper().strip()
         if value_type in {"NA", "ED"}:
+            obs_timestamp = _resolve_obs_timestamp(
+                obx, msg_timestamp, vital_type, warnings, findings
+            )
+            if obs_timestamp is None:
+                return None
             return self._build_waveform_sample(
                 obx=obx,
                 value_type=value_type,
                 vital_type=vital_type,
                 device_id=device_id,
-                msg_timestamp=msg_timestamp,
+                msg_timestamp=obs_timestamp,
                 warnings=warnings,
             )
 
@@ -455,9 +466,13 @@ class HL7v2Adapter:
             vital_type=vital_type,
         )
 
-        # OBX-14: Date/Time of Observation (use message timestamp as fallback)
-        obs_ts_str = _safe_field(obx, "obx_14")
-        obs_timestamp = _parse_hl7_datetime(obs_ts_str) if obs_ts_str else msg_timestamp
+        # OBX-14: Date/Time of Observation (message timestamp as fallback).
+        # A2 / N-03: absent or unparseable ⇒ UNPARSEABLE_TIMESTAMP, never now().
+        obs_timestamp = _resolve_obs_timestamp(
+            obx, msg_timestamp, vital_type, warnings, findings
+        )
+        if obs_timestamp is None:
+            return None
 
         # Parse value based on VitalSignType
         if vital_type is VitalSignType.CONSCIOUSNESS:
@@ -931,6 +946,84 @@ def _parse_hl7_datetime(hl7_ts: str) -> datetime:
                 continue
 
     return datetime.now(tz=timezone.utc)
+
+
+def _parse_hl7_datetime_strict(hl7_ts: str) -> datetime | None:
+    """
+    Parse an HL7 DTM string; return None (not now()) when it cannot be parsed.
+
+    A2 / N-03. The lenient _parse_hl7_datetime above is kept unchanged for
+    existing callers/tests, but the adapter no longer uses it.
+    """
+    ts = hl7_ts.strip()
+    m = re.fullmatch(r"(\d{4}(?:\d{2}){0,5})(?:\.\d+)?([+-]\d{4})?", ts)
+    if not m:
+        return None
+    try:
+        parsed = _parse_hl7_datetime(ts)
+    except ValueError:
+        return None
+    # _parse_hl7_datetime's own fallback is now(); a well-formed DTM of a
+    # recognised length never takes that path, but guard anyway.
+    digits = m.group(1)
+    if len(digits) not in (4, 6, 8, 10, 12, 14):
+        return None
+    if parsed.year != int(digits[:4]):
+        return None
+    return parsed
+
+
+def _resolve_obs_timestamp(
+    obx: object,
+    msg_timestamp: datetime | None,
+    vital_type: VitalSignType,
+    warnings: list[str],
+    findings: list[Finding] | None,
+) -> datetime | None:
+    """
+    OBX-14 if present and parseable, else MSH-7; None (+ finding) otherwise.
+
+    INTERIM (BLOCKED-TEST-CONFLICT, HD-E6 entry A2-1): when BOTH OBX-14 and
+    MSH-7 are absent, the sample is kept with the receipt time as a
+    placeholder so the existing test
+    test_hl7v2_vendor_edge_cases.py::...::test_msh_with_only_the_required_leading_fields_does_not_crash
+    stays green. The UNPARSEABLE_TIMESTAMP finding is still recorded, which
+    forces INCOMPLETE: no NEWS2 score is ever computed from that placeholder.
+    A present-but-unparseable OBX-14 is always skipped (never now()).
+    """
+    obs_ts_str = _safe_field(obx, "obx_14").strip()
+    ts = _parse_hl7_datetime_strict(obs_ts_str) if obs_ts_str else msg_timestamp
+    if ts is None and not obs_ts_str and msg_timestamp is None:
+        warnings.append(
+            f"[OBX-TIME] No observation time for {vital_type.name} (OBX-14 and "
+            "MSH-7 absent). Receipt time used as a PLACEHOLDER only; the "
+            "sample cannot contribute to a score."
+        )
+        if findings is not None:
+            findings.append(
+                Finding(
+                    ReasonCode.UNPARSEABLE_TIMESTAMP,
+                    vital_type,
+                    "Observation time absent; receipt time is a placeholder, "
+                    "not an observation time. No score.",
+                )
+            )
+        return datetime.now(tz=timezone.utc)
+    if ts is None:
+        warnings.append(
+            f"[OBX-TIME] No usable observation time for {vital_type.name} "
+            "(OBX-14 and MSH-7 absent or unparseable). Segment skipped; "
+            "time is never assumed to be now."
+        )
+        if findings is not None:
+            findings.append(
+                Finding(
+                    ReasonCode.UNPARSEABLE_TIMESTAMP,
+                    vital_type,
+                    "Observation time absent or unparseable; not assumed current.",
+                )
+            )
+    return ts
 
 
 def _parse_numeric(raw: str) -> float | None:

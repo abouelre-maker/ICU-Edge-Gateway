@@ -128,6 +128,13 @@ class BundleAssembler:
                     device_id=device_id,
                     encounter_id=encounter_id,
                 )
+                # A2: effective time is when the inputs were observed, not
+                # when the score was calculated; calculation time → issued.
+                news2_dict["issued"] = news2_dict["effectiveDateTime"]
+                if result.assessment.observation_time is not None:
+                    news2_dict["effectiveDateTime"] = _format_fhir_datetime(
+                        result.assessment.observation_time
+                    )
                 entries.append(
                     {
                         "fullUrl": f"urn:uuid:{news2_dict['id']}",

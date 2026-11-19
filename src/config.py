@@ -372,6 +372,31 @@ def get_reattestation_interval_seconds() -> float:
     return interval
 
 
+def validate_news2_scoring_config() -> None:
+    """
+    Fail-closed startup check (A2, decision Q1(b)): the NEWS2 module may only
+    run with every per-parameter staleness window configured. No clinical
+    default exists anywhere in src/ — the values belong to a clinical safety
+    reviewer (HD-E7). Raises RuntimeError naming every missing variable, or the
+    ValueError of the first invalid one.
+    """
+    import os  # noqa: PLC0415 - local to keep this module's import surface unchanged
+
+    from domain.services.scoring_gate import (  # noqa: PLC0415
+        policy_from_environment,
+        window_env_names,
+    )
+
+    missing = [n for n in window_env_names() if not os.environ.get(n, "").strip()]
+    if missing:
+        raise RuntimeError(
+            "NEWS2 scoring refuses to start: staleness windows not configured: "
+            + ", ".join(missing)
+            + " (clinical values; see docs/assessment/HUMAN_DECISIONS.md HD-E7)."
+        )
+    policy_from_environment()  # raises ValueError on an invalid value
+
+
 def get_cors_allowed_origins() -> list[str]:
     """
     Read CORS_ALLOWED_ORIGINS (comma-separated) from the environment.

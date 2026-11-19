@@ -44,9 +44,28 @@ Each item: what is needed, options, recommendation, and what it blocks. Status i
 
 ### HD-E6 — BLOCKED-TEST-CONFLICT items
 - **Blocks:** each affected finding.
-- **Entries:** none yet. Each will be appended below with node ID, assertion, locked-in
-  behaviour, why it is wrong, and the two options.
-- **Status:** OPEN (empty)
+- **Status:** OPEN — 1 entry.
+
+#### A2-1 — `tests/integration/test_hl7v2_vendor_edge_cases.py::TestMalformedOrTruncatedMsh3::test_msh_with_only_the_required_leading_fields_does_not_crash`
+- **Assertion:** `assert len(result.samples) == 1` for a message with MSH-7 absent and
+  no OBX-14 (the OBX has status in OBX-10 and a timestamp in OBX-13, so OBX-14 is empty).
+- **Behaviour it locks in:** a sample is produced even though the message has **no
+  usable observation time**; previously that time was silently set to `now()`.
+- **Why that is wrong:** a sample without an observation time looks current. That is
+  exactly the A2 / N-03 hazard.
+- **Why it was not amended under the delegated A1/A2 rule:** it fails solely because of A2,
+  but condition 3 speaks of replacing an *expected score*. This test asserts a sample count,
+  not a score, so not all five conditions clearly hold. Per R8, no judgement is used.
+- **Interim now in the code (keeps the test green, stays fail-safe for scoring):** when
+  both OBX-14 and MSH-7 are absent, the sample is kept with the receipt time as a
+  placeholder. `UNPARSEABLE_TIMESTAMP` is always recorded, and that forces
+  INCOMPLETE: no NEWS2 score is ever computed from it. A present-but-unparseable
+  OBX-14 is always skipped. Residual: the per-vital FHIR Observation for such a sample
+  shows the receipt time as its effective time.
+- **Options:**
+  1. **Amend the test** to expect 0 samples plus an `UNPARSEABLE_TIMESTAMP` finding (full A2;
+     the sample is dropped with an explicit reason). **Recommended.**
+  2. **Keep the interim** placeholder behaviour and close this sub-item WONTFIX.
 
 ### Delegated design decisions (Step 3) — decided by delegation 2026-09-29, pending clinical review
 

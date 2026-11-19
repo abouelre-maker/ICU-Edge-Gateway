@@ -12,14 +12,30 @@ CRITICAL, not an artifact. It is passed to the calculator (so a downstream
 consumer that reads only the number sees a high score, never "no score") and
 flagged CRITICAL_VALUE_REVIEW_REQUIRED with the measured value preserved.
 Only physically impossible data stays an artifact. No bound value changes.
+
+A2 (decisions Q1(b), Q3): every NEWS2 input must be fresh. Per-parameter
+staleness windows are mandatory configuration with NO default anywhere in
+src/ — they are clinical values owned by a clinical safety reviewer (HD-E7).
+With any window unset the gate withholds the score (STALENESS_POLICY_UNSET)
+and the service refuses to start (config.validate_news2_scoring_config).
+The future-timestamp tolerance is a clock-skew engineering parameter:
+default 60 s, configurable.
+
+Design note: the policy is read from the environment *per call* by default,
+inside the domain. That is a deliberate exception to "no I/O in the domain":
+it guarantees no construction path (a test, a new endpoint, a forgotten
+wiring) can ever score without the staleness check.
 """
 
 from __future__ import annotations
 
 import dataclasses
 import math
-from collections.abc import Sequence
+import os
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import ClassVar
 
 from domain.entities.patient_context import PatientContext
 from domain.entities.score_outcome import (
@@ -54,6 +70,64 @@ def is_physically_impossible(vital_type: VitalSignType, value: float) -> bool:
     return vital_type is VitalSignType.SUPPLEMENTAL_O2 and value not in (0.0, 1.0)
 
 
+WINDOW_ENV_TEMPLATE = "NEWS2_STALENESS_WINDOW_{name}_SECONDS"
+TOLERANCE_ENV = "FUTURE_TIMESTAMP_TOLERANCE_SECONDS"
+_DEFAULT_FUTURE_TOLERANCE = timedelta(seconds=60)  # Q3: engineering, not clinical
+
+
+@dataclass(frozen=True)
+class ScoringPolicy:
+    REQUIRED_TYPES: ClassVar[tuple[VitalSignType, ...]] = (
+        VitalSignType.RESPIRATORY_RATE,
+        VitalSignType.SPO2,
+        VitalSignType.SUPPLEMENTAL_O2,
+        VitalSignType.SYSTOLIC_BP,
+        VitalSignType.HEART_RATE,
+        VitalSignType.CONSCIOUSNESS,
+        VitalSignType.TEMPERATURE_CELSIUS,
+    )
+
+    staleness_windows: Mapping[VitalSignType, timedelta]
+    future_tolerance: timedelta = _DEFAULT_FUTURE_TOLERANCE
+
+
+def window_env_names() -> list[str]:
+    return [WINDOW_ENV_TEMPLATE.format(name=t.name) for t in ScoringPolicy.REQUIRED_TYPES]
+
+
+def _positive_seconds(name: str, raw: str) -> timedelta:
+    try:
+        seconds = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number of seconds. Got {raw!r}.") from exc
+    if not math.isfinite(seconds) or seconds <= 0:
+        raise ValueError(f"{name} must be a positive number of seconds. Got {raw!r}.")
+    return timedelta(seconds=seconds)
+
+
+def policy_from_environment() -> ScoringPolicy | None:
+    """
+    Build the policy from NEWS2_STALENESS_WINDOW_<TYPE>_SECONDS (all seven
+    required) and FUTURE_TIMESTAMP_TOLERANCE_SECONDS (default 60).
+    Returns None if any window is unset; raises ValueError if any is invalid.
+    """
+    windows: dict[VitalSignType, timedelta] = {}
+    for vt, name in zip(ScoringPolicy.REQUIRED_TYPES, window_env_names(), strict=True):
+        raw = os.environ.get(name, "").strip()
+        if not raw:
+            return None
+        windows[vt] = _positive_seconds(name, raw)
+    raw_tol = os.environ.get(TOLERANCE_ENV, "").strip()
+    tolerance = (
+        _positive_seconds(TOLERANCE_ENV, raw_tol) if raw_tol else _DEFAULT_FUTURE_TOLERANCE
+    )
+    return ScoringPolicy(staleness_windows=windows, future_tolerance=tolerance)
+
+
+def _utc_now() -> datetime:
+    return datetime.now(tz=timezone.utc)
+
+
 @dataclass(frozen=True)
 class GateResult:
     assessment: ScoringAssessment
@@ -62,6 +136,14 @@ class GateResult:
 
 
 class ScoringGate:
+    def __init__(
+        self,
+        policy_provider: Callable[[], ScoringPolicy | None] | None = None,
+        clock: Callable[[], datetime] | None = None,
+    ) -> None:
+        self._policy_provider = policy_provider or policy_from_environment
+        self._clock = clock or _utc_now
+
     def assess(
         self,
         processed: Sequence[ProcessedVitalSign],
@@ -138,6 +220,49 @@ class ScoringGate:
                     "No air/supplemental-oxygen observation; not assumed room air.",
                 )
             )
+
+        # A2: freshness of the most recent admitted sample of each input.
+        policy = self._policy_provider()
+        if policy is None:
+            findings.append(
+                Finding(
+                    ReasonCode.STALENESS_POLICY_UNSET,
+                    None,
+                    "Staleness windows are not configured (HD-E7); no score.",
+                )
+            )
+        else:
+            now = self._clock()
+            for vt in ScoringPolicy.REQUIRED_TYPES:
+                candidates = [
+                    pv.original
+                    for pv in inputs
+                    if pv.original.vital_sign_type is vt
+                    and pv.is_within_physiological_bounds
+                    and pv.original.waveform is None
+                    and (vt is not VitalSignType.CONSCIOUSNESS or pv.original.avpu_level)
+                ]
+                if not candidates:
+                    continue  # already reported as missing
+                latest = max(candidates, key=lambda s: s.timestamp)
+                if latest.timestamp - now > policy.future_tolerance:
+                    findings.append(
+                        Finding(
+                            ReasonCode.FUTURE_TIMESTAMP,
+                            vt,
+                            "Observation time is in the future beyond the "
+                            f"{policy.future_tolerance.total_seconds():g} s tolerance.",
+                        )
+                    )
+                elif now - latest.timestamp > policy.staleness_windows[vt]:
+                    findings.append(
+                        Finding(
+                            ReasonCode.STALE_OBSERVATION,
+                            vt,
+                            "Most recent observation is older than the configured "
+                            f"{policy.staleness_windows[vt].total_seconds():g} s window.",
+                        )
+                    )
 
         used = [
             pv.original.timestamp
