@@ -12,6 +12,7 @@ Update the test counts below at the end of every Track E phase, with the date.
 |---|---|---|---|---|---|
 | 2026-09-29 | `main` @ `83f3a7f` | 816 passed, 1 xfailed | 95% statements | ruff clean, mypy clean | Python 3.11.9 |
 | 2026-09-30 | `hardening/assessment-2026-09` (Step 1 start) | 816 passed, 1 xfailed | 95% | ruff clean, mypy clean | Python 3.11.9 |
+| 2026-09-30 | `hardening/assessment-2026-09` @ `96d59cb` (end of Phase 1) | 943 passed, 4 xfailed (1 original + 3 strict-xfail documenting blocked A5 sub-items) | 95% | ruff clean, mypy clean | Python 3.11.9 |
 
 ## TRUE — may be said
 
@@ -46,10 +47,10 @@ Status column is updated as Track E closes findings (see `ASSESSMENT_2026-09.md`
 | Gap | Findings | Status |
 |---|---|---|
 | No authentication or TLS on ingest paths | F-01, F-08, F-09/10 | OPEN |
-| Some missing inputs default to "normal" | A1 | OPEN |
-| No staleness logic | A2 | OPEN |
+| Some missing inputs default to "normal" | A1 | CLOSED 2026-09-30 (missing ACVPU/O2 ⇒ INCOMPLETE) |
+| No staleness logic | A2 | CLOSED 2026-09-30, except sub-item A2-1 (absent MSH-7 + OBX-14 ⇒ placeholder time, never scored) awaiting decision |
 | FHIR bundles with warnings are not strictly valid R4 | H-01 | OPEN |
-| MLLP ACKs not fully conformant | A8, F-03 | OPEN |
+| MLLP ACKs not fully conformant | A8, F-03 | PARTIAL: A8 fixed except MSH-10 de-duplication (A8-1); F-03 OPEN |
 | No durable queue | A8 | OPEN |
 | No high availability | — | OPEN (not in scope) |
 | Regulatory classification unresolved | R-01, R-02 | OPEN |
