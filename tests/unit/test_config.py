@@ -133,11 +133,10 @@ class TestGetMllpEnabled:
 
 
 class TestGetMllpHost:
-    def test_defaults_to_bind_all_interfaces(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_defaults_to_loopback(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        # F01-2 (HD-E6 option 1, approved 2026-11-19): was "0.0.0.0".
         monkeypatch.delenv("MLLP_HOST", raising=False)
-        assert get_mllp_host() == "0.0.0.0"
+        assert get_mllp_host() == "127.0.0.1"
 
     def test_reads_explicit_host(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("MLLP_HOST", "10.0.0.5")

@@ -38,10 +38,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import queue
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Any
 
@@ -67,7 +69,14 @@ from dashboard_logic import (
 
 GATEWAY_HOST = "127.0.0.1"
 GATEWAY_PORT = 8000
-WS_URL = f"ws://{GATEWAY_HOST}:{GATEWAY_PORT}/api/v1/live/vitals"
+# F-01/F-08: the gateway requires an API key. run_demo.* generates one per
+# session and exports it as GATEWAY_API_KEY. Browsers cannot set headers on
+# a WebSocket, so the live channel takes it as the access_token parameter.
+API_KEY = os.environ.get("GATEWAY_API_KEY", "")
+WS_URL = (
+    f"ws://{GATEWAY_HOST}:{GATEWAY_PORT}/api/v1/live/vitals"
+    f"?access_token={urllib.parse.quote(API_KEY)}"
+)
 BASE_URL = f"http://{GATEWAY_HOST}:{GATEWAY_PORT}"
 
 # Match the streamer's default send interval. Rerunning FASTER than data
@@ -168,7 +177,7 @@ def post_vitals(
     request = urllib.request.Request(  # nosec B310 — fixed http scheme, local host
         f"{BASE_URL}/api/v1/vitals",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {API_KEY}"},
         method="POST",
     )
     started = time.monotonic()

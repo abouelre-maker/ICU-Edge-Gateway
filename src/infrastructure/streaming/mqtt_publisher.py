@@ -58,13 +58,18 @@ sign-off; new hazard for new code):
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import functools
+import hashlib
+import hmac
 import json
+import secrets
 from typing import Any
 
 import paho.mqtt.client as mqtt
 import structlog
+from domain.entities.patient_context import is_safe_patient_id
 
 from infrastructure.streaming.fhir_bundle_utils import extract_patient_id
 from infrastructure.streaming.ring_buffer import StoreAndForwardRingBuffer
@@ -75,11 +80,25 @@ _DEFAULT_RETRY_BACKOFF_SECONDS = 5.0
 _DEFAULT_PUBLISH_TIMEOUT_SECONDS = 10.0
 _DEFAULT_MIN_RECONNECT_DELAY_SECONDS = 1
 _DEFAULT_MAX_RECONNECT_DELAY_SECONDS = 60
+_DEAD_LETTER_CAPACITY = 1000  # F-04: bounded; oldest dropped first
 
 # Kept as a module-level alias (rather than removed outright): moved to the
 # shared infrastructure/streaming/fhir_bundle_utils.py module so
 # LiveDashboardChannel can reuse the same logic instead of duplicating it.
 _extract_patient_id = extract_patient_id
+
+# F-04: an MQTT topic is metadata: brokers log it, ACLs and wildcard
+# subscribers see it, payload encryption does not cover it. The topic carries
+# an opaque per-patient segment, HMAC-SHA256(MQTT_TOPIC_KEY, patient id)
+# truncated to 128 bits, never the identifier itself. Consumers demultiplex on
+# the Bundle (TLS-protected payload), which still names the patient.
+_TOPIC_SEGMENT_HEX = 32
+
+
+def opaque_topic_segment(patient_id: str, key: bytes) -> str:
+    """Stable, non-reversible topic segment for one patient under one key."""
+    digest = hmac.new(key, patient_id.encode("utf-8"), hashlib.sha256).hexdigest()
+    return digest[:_TOPIC_SEGMENT_HEX]
 
 
 class MQTTPublisher:
@@ -108,6 +127,7 @@ class MQTTPublisher:
         drain_batch_size: int = 50,
         retry_backoff_seconds: float = _DEFAULT_RETRY_BACKOFF_SECONDS,
         publish_timeout_seconds: float = _DEFAULT_PUBLISH_TIMEOUT_SECONDS,
+        topic_key: bytes | None = None,
     ) -> None:
         if qos not in (0, 1, 2):
             raise ValueError(f"qos must be 0, 1, or 2 per the MQTT spec. Got {qos!r}.")
@@ -116,6 +136,10 @@ class MQTTPublisher:
         self._broker_host = broker_host
         self._broker_port = broker_port
         self._topic_prefix = topic_prefix.rstrip("/")
+        # F-04: without a configured key a random per-process key is used:
+        # topics stay opaque but change on restart. Production supplies
+        # MQTT_TOPIC_KEY (config.get_mqtt_config refuses to start without it).
+        self._topic_key = topic_key if topic_key else secrets.token_bytes(32)
         self._client_id = client_id
         self._use_tls = use_tls
         self._qos = qos
@@ -130,15 +154,31 @@ class MQTTPublisher:
         self._task: asyncio.Task[None] | None = None
         self._stop_event: asyncio.Event | None = None
         self._published_count = 0
+        # F-04: messages that can never be published (bad topic / paho
+        # ValueError) are parked here instead of being requeued forever.
+        self._dead_letters: collections.deque[dict[str, Any]] = collections.deque(
+            maxlen=_DEAD_LETTER_CAPACITY
+        )
+        self._dead_letter_count = 0
 
     @property
     def published_count(self) -> int:
         """Total Bundles successfully published (broker-acknowledged) since start()."""
         return self._published_count
 
+    @property
+    def dead_letter_count(self) -> int:
+        """Total Bundles dead-lettered since construction (F-04)."""
+        return self._dead_letter_count
+
+    def _dead_letter(self, bundle: dict[str, Any], reason: str) -> None:
+        self._dead_letters.append(bundle)
+        self._dead_letter_count += 1
+        _log.error("mqtt_publisher.dead_lettered", reason=reason)
+
     def topic_for(self, bundle: dict[str, Any]) -> str:
         patient_id = _extract_patient_id(bundle)
-        return f"{self._topic_prefix}/{patient_id}"
+        return f"{self._topic_prefix}/{opaque_topic_segment(patient_id, self._topic_key)}"
 
     async def start(self) -> None:
         client = mqtt.Client(
@@ -255,6 +295,11 @@ class MQTTPublisher:
                 unpublished.append(bundle)
                 continue
 
+            if not is_safe_patient_id(_extract_patient_id(bundle)):
+                # F-04: never build a topic from an unsafe identifier; never
+                # log the identifier itself.
+                self._dead_letter(bundle, "patient identifier not topic-safe")
+                continue
             topic = self.topic_for(bundle)
 
             # ISO 14971 HAZARD-DSP-007 defense-in-depth policy (explicit,
@@ -302,6 +347,10 @@ class MQTTPublisher:
                     )
                 if self._qos > 0:
                     info.wait_for_publish(timeout=self._publish_timeout_seconds)
+            except ValueError as exc:
+                # F-04: paho rejects the topic itself (wildcards / too long):
+                # retrying can never succeed — dead-letter, keep draining.
+                self._dead_letter(bundle, f"paho rejected topic: {exc}")
             except Exception as exc:  # noqa: BLE001 - any publish failure requeues, never drops
                 _log.warning(
                     "mqtt_publisher.publish_failed", topic=topic, error=str(exc)

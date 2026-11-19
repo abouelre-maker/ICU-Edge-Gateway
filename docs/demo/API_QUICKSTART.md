@@ -36,6 +36,18 @@ Interactive documentation:
 
 ---
 
+## Authentication
+
+`/api/v1/ingest`, `/api/v1/vitals` and the WebSocket require an API key. The
+gateway reads keys from `GATEWAY_API_KEYS` (comma-separated, each at least 32
+characters) and refuses to start without them. `run_demo.*` generates a fresh
+key per run and exports it as `GATEWAY_API_KEY`; the examples below use it.
+A missing or wrong key returns `401` with `WWW-Authenticate: Bearer`.
+
+```bash
+export GATEWAY_API_KEY="<the key the gateway was started with>"
+```
+
 ## `GET /health`
 
 ```bash
@@ -91,6 +103,7 @@ printf 'OBX|6|NM|57834-7^Oxygen therapy^LN||0||||||F|||20260821120000\r'        
 printf 'OBX|7|ST|76270-8^AVPU score^LN||A||||||F|||20260821120000\r'                               >> msg.hl7
 
 curl -s -D - -X POST 'http://localhost:8000/api/v1/ingest?spo2_scale=SCALE_1' \
+     -H "Authorization: Bearer $GATEWAY_API_KEY" \
      -H 'Content-Type: text/plain' --data-binary @msg.hl7
 ```
 
@@ -110,6 +123,7 @@ parameter.
 
 ```bash
 curl -s -X POST http://localhost:8000/api/v1/vitals \
+  -H "Authorization: Bearer $GATEWAY_API_KEY" \
   -H 'Content-Type: application/json' -d '{
     "patient_id": "PT-DEMO-002",
     "spo2_scale": "SCALE_2",
@@ -138,7 +152,7 @@ Present on **both** ingest endpoints:
 |---|---|---|
 | `X-CDS-Advisory-Only` | `true` | Always `true`. Advisory-only output. |
 | `X-Pipeline-Duration-Ms` | `1.69` | Domain pipeline duration for this request |
-| `X-Warning-Count` | `0` | Number of pipeline warnings (see `Bundle.note`) |
+| `X-Warning-Count` | `0` | Number of pipeline warnings (see the `OperationOutcome` entry) |
 | `X-NEWS2-Total` | `0` | **Omitted** when no score could be produced |
 | `X-NEWS2-Risk-Level` | `NORMAL` | `NORMAL`, `LOW`, `LOW_MEDIUM`, `MEDIUM`, `HIGH`. **Omitted** with the total. |
 | `Content-Type` | `application/fhir+json` | |
@@ -222,7 +236,7 @@ the NEWS2 `Observation`.
   component — a real bug found during development.
 - **Every component carries both a LOINC and a SNOMED coding.** Match on
   either.
-- **`Bundle.note[]` carries DSP pipeline warnings** (rejected artifacts). The
+- **An `OperationOutcome` entry carries DSP pipeline warnings** (issues coded `PIPELINE_WARNING`; `Bundle.note` before 2026-11-19) (rejected artifacts). The
   advisory note lives on the NEWS2 **Observation**, not the Bundle. Different
   arrays; do not conflate.
 - **A rejected reading is present, not absent.** Out-of-bounds observations
@@ -253,8 +267,11 @@ the NEWS2 `Observation`.
 
 ## WebSocket — `ws://localhost:8000/api/v1/live/vitals`
 
-No query parameters, no authentication, no subprotocol. Every connected
-client receives every delta for every patient; demultiplex by `patient_id`.
+Requires the API key, as `Authorization: Bearer <key>` or as the
+`access_token` query parameter (browsers cannot set WebSocket headers). When
+an `Origin` header is sent it must be on `CORS_ALLOWED_ORIGINS`. A refused
+connection is closed with code 1008. No subprotocol. Every connected client
+receives every delta for every patient; demultiplex by `patient_id`.
 
 **Push-only. There is no snapshot frame on connect** — a newly connected
 client sees nothing until the next message is ingested. This is by design, not
@@ -281,10 +298,12 @@ Exactly one frame type is emitted:
   arrivals.
 
 ```python
-import asyncio, json, websockets
+import asyncio, json, os, urllib.parse, websockets
+
+KEY = urllib.parse.quote(os.environ["GATEWAY_API_KEY"])
 
 async def main():
-    async with websockets.connect("ws://localhost:8000/api/v1/live/vitals") as ws:
+    async with websockets.connect(f"ws://localhost:8000/api/v1/live/vitals?access_token={KEY}") as ws:
         async for raw in ws:
             d = json.loads(raw)
             n = d.get("news2") or {}
@@ -331,11 +350,11 @@ MSA|AA|ACK20260821120000|
 
 | Status | Cause |
 |---|---|
-| 200 | Success — including a degraded score with warnings in `Bundle.note` |
+| 200 | Success — including a degraded score with warnings in the `OperationOutcome` entry |
 | 422 | Invalid query/body parameter (e.g. `device_vendor=auto`) |
 | 500 | Unhandled error. The response body deliberately omits exception type, message and traceback (IEC 62304 REQ-API-002); the detail is in the server log. |
 
 A message whose NEWS2-mandatory parameter is rejected still returns **200**
-with a Bundle — the other observations are present, `Bundle.note` explains the
+with a Bundle — the other observations are present, the `OperationOutcome` entry explains the
 rejection, and the `X-NEWS2-*` headers are omitted. A degraded but honest
 response, not an error.

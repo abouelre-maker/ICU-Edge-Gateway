@@ -54,6 +54,16 @@ from infrastructure.streaming.url_safety import validate_webhook_endpoint
 
 _SUBSCRIPTION_PROFILE: Final = "http://hl7.org/fhir/StructureDefinition/Subscription"
 _DEFAULT_PAYLOAD_MIME_TYPE: Final = "application/fhir+json"
+# F-07: channel.header limits (RFC 9110 token for the name).
+_MAX_HEADER_LINES: Final = 10
+_MAX_HEADER_LINE_CHARS: Final = 1024
+_HEADER_NAME: Final = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]{1,64}")
+_REDACTED: Final = "***"
+
+
+def _redact_header(line: str) -> str:
+    name, _, _ = line.partition(":")
+    return f"{name.strip()}: {_REDACTED}"
 
 _CRITERIA_PATIENT_RE: Final = re.compile(
     r"^Bundle\?patient=Patient/(?P<patient_id>[^&]+)$"
@@ -124,7 +134,9 @@ class Subscription:
                 "type": self.channel.type.value,
                 "endpoint": self.channel.endpoint,
                 "payload": self.channel.payload_mime_type,
-                "header": list(self.channel.headers),
+                # F-07: values usually carry the subscriber's credential;
+                # responses show the header names only.
+                "header": [_redact_header(h) for h in self.channel.headers],
             },
         }
         if self.end is not None:
@@ -219,6 +231,25 @@ def create_subscription_from_fhir_request(
         raise ValueError(
             "Subscription.channel.header, if present, must be a list of strings."
         )
+    # F-07: header lines are sent verbatim to the subscriber; refuse CR/LF and
+    # control characters (header injection), malformed names, and abuse sizes.
+    if len(headers_raw) > _MAX_HEADER_LINES:
+        raise ValueError(
+            f"Subscription.channel.header allows at most {_MAX_HEADER_LINES} entries."
+        )
+    for line in headers_raw:
+        name, sep, _value = line.partition(":")
+        if (
+            not sep
+            or len(line) > _MAX_HEADER_LINE_CHARS
+            or not _HEADER_NAME.fullmatch(name.strip())
+            or any(ord(c) < 0x20 or ord(c) == 0x7F for c in line)
+        ):
+            raise ValueError(
+                "Subscription.channel.header entries must be 'Name: value' lines "
+                f"of at most {_MAX_HEADER_LINE_CHARS} characters with no control "
+                "characters (F-07)."
+            )
 
     payload_mime = channel_payload.get("payload") or _DEFAULT_PAYLOAD_MIME_TYPE
     if payload_mime != _DEFAULT_PAYLOAD_MIME_TYPE:

@@ -8,9 +8,18 @@ systematic NEWS2 underestimation — SpO2 target range differs by 6+ percentage 
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
+
+# F-04: identifiers that are safe in FHIR references, logs and MQTT topics.
+PATIENT_ID_PATTERN = r"^[A-Za-z0-9._-]{1,64}$"
+_PATIENT_ID_RE = re.compile(PATIENT_ID_PATTERN)
+
+
+def is_safe_patient_id(patient_id: str) -> bool:
+    return bool(_PATIENT_ID_RE.fullmatch(patient_id))
 
 
 class SpO2Scale(str, Enum):

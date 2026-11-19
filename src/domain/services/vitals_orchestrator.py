@@ -24,8 +24,10 @@ import structlog
 
 from domain.entities.news2_score import NEWS2Score
 from domain.entities.patient_context import PatientContext
+from domain.entities.score_outcome import Finding, ReasonCode, ScoringAssessment
 from domain.entities.vital_sign import VitalSignSample, VitalSignType
 from domain.services.news2_calculator import NEWS2Calculator, NEWS2InsufficientDataError
+from domain.services.scoring_gate import ScoringGate
 from domain.services.signal_processor import ProcessedVitalSign, VitalSignProcessor
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
@@ -47,6 +49,8 @@ class VitalsAnalysisResult:
         news2_missing_parameters: Vital types absent from input (incomplete score).
         processing_duration_ms:   End-to-end pipeline latency in milliseconds.
         pipeline_warnings:        Audit notes from processing stages.
+        assessment:               Machine-readable outcome + reason codes
+                                  (docs/assessment/PHASE1_DESIGN.md).
     """
 
     patient_id: str
@@ -56,6 +60,7 @@ class VitalsAnalysisResult:
     news2_missing_parameters: tuple[VitalSignType, ...]
     processing_duration_ms: float
     pipeline_warnings: tuple[str, ...]
+    assessment: ScoringAssessment
 
 
 class VitalsOrchestrator:
@@ -73,14 +78,17 @@ class VitalsOrchestrator:
         self,
         processor: VitalSignProcessor | None = None,
         calculator: NEWS2Calculator | None = None,
+        gate: ScoringGate | None = None,
     ) -> None:
         self._processor = processor or VitalSignProcessor()
         self._calculator = calculator or NEWS2Calculator()
+        self._gate = gate or ScoringGate()
 
     def analyse(
         self,
         samples: Sequence[VitalSignSample],
         context: PatientContext,
+        upstream_findings: Sequence[Finding] = (),
     ) -> VitalsAnalysisResult:
         """
         Execute the full domain pipeline on a set of vital sign samples.
@@ -119,48 +127,70 @@ class VitalsOrchestrator:
                 warnings.append(warn)
                 log.warning("vitals_orchestrator.processor.error", error=str(e))
 
-        # Collect artifact flags from processing
+        # ── Stage 2: Scoring gate (A6 and later Phase 1 checks) ───────────────
+        gate_result = self._gate.assess(processed, context, upstream_findings)
+        assessment = gate_result.assessment
+        critical_types = {
+            f.parameter
+            for f in assessment.findings
+            if f.code is ReasonCode.CRITICAL_VALUE_REVIEW_REQUIRED
+        }
+
+        # Collect artifact / critical flags from processing
         for pv in processed:
             if not pv.is_within_physiological_bounds:
-                warnings.append(
-                    f"[ARTIFACT] {pv.original.vital_sign_type.name} value "
-                    f"{pv.original.value!r} outside physiological bounds — "
-                    "excluded from NEWS2 calculation."
-                )
+                vt = pv.original.vital_sign_type
+                if vt in critical_types:
+                    warnings.append(
+                        f"[CRITICAL] {vt.name} value {pv.original.value!r} outside "
+                        "plausibility bounds but physically possible — scored per "
+                        "RCP 2017 tables; clinical review required."
+                    )
+                else:
+                    warnings.append(
+                        f"[ARTIFACT] {vt.name} value "
+                        f"{pv.original.value!r} outside physiological bounds — "
+                        "excluded from NEWS2 calculation."
+                    )
             for note in pv.pipeline_notes:
                 if "[HAMPEL]" in note and "0 motion" not in note:
                     warnings.append(note)
 
-        # ── Stage 2: NEWS2 Calculation ─────────────────────────────────────────
+        # ── Stage 3: NEWS2 Calculation (only when the gate allows it) ─────────
         news2: NEWS2Score | None = None
-        missing_types: tuple[VitalSignType, ...] = ()
+        missing_types: tuple[VitalSignType, ...] = tuple(
+            sorted(
+                {
+                    f.parameter
+                    for f in assessment.findings
+                    if f.code is ReasonCode.MISSING_PARAMETER
+                    and f.parameter is not None
+                },
+                key=lambda t: t.value,
+            )
+        )
 
-        try:
-            news2 = self._calculator.calculate(processed, context)
-            log.info(
-                "vitals_orchestrator.news2.calculated",
-                total_score=news2.total,
-                risk_level=news2.risk_level.value,
+        if assessment.blocks_scoring:
+            warnings.append(
+                "[NEWS2-INCOMPLETE] No score computed. Reasons: "
+                + ", ".join(assessment.reason_codes)
             )
-        except NEWS2InsufficientDataError as e:
-            warnings.append(f"[NEWS2-INCOMPLETE] {e}")
-            log.warning("vitals_orchestrator.news2.insufficient_data", error=str(e))
-            # Identify which required parameters are absent or invalid
-            from domain.services.news2_calculator import (
-                _REQUIRED_VITAL_TYPES,  # noqa: PLC0415
+            log.warning(
+                "vitals_orchestrator.news2.withheld",
+                reasons=list(assessment.reason_codes),
             )
-
-            available = frozenset(
-                pv.original.vital_sign_type
-                for pv in processed
-                if pv.is_within_physiological_bounds
-            )
-            missing_types = tuple(
-                sorted(
-                    _REQUIRED_VITAL_TYPES - available,
-                    key=lambda t: t.value,
+        else:
+            try:
+                news2 = self._calculator.calculate(gate_result.scoring_inputs, context)
+                log.info(
+                    "vitals_orchestrator.news2.calculated",
+                    total_score=news2.total,
+                    risk_level=news2.risk_level.value,
+                    outcome=assessment.outcome.value,
                 )
-            )
+            except NEWS2InsufficientDataError as e:  # defensive: gate should prevent
+                warnings.append(f"[NEWS2-INCOMPLETE] {e}")
+                log.warning("vitals_orchestrator.news2.insufficient_data", error=str(e))
 
         duration_ms = (time.perf_counter() - t_start) * 1000.0
         log.info(
@@ -177,4 +207,5 @@ class VitalsOrchestrator:
             news2_missing_parameters=missing_types,
             processing_duration_ms=duration_ms,
             pipeline_warnings=tuple(warnings),
+            assessment=assessment,
         )

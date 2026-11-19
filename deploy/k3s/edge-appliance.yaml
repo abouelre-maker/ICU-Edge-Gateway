@@ -157,6 +157,15 @@ spec:
             # var would be.
             - name: ENROLLMENT_TOKEN_FILE
               value: /etc/icu-edge-gateway/enrollment/token
+            # F-01: API keys for /api/v1/ingest, /api/v1/vitals and the live
+            # WebSocket. Required: the gateway refuses to start without them.
+            #   kubectl create secret generic icu-edge-gateway-api-keys \
+            #     --from-literal=keys="$(openssl rand -base64 36)"
+            - name: GATEWAY_API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: icu-edge-gateway-api-keys
+                  key: keys
           volumeMounts:
             - name: pki
               mountPath: /var/lib/icu-edge-gateway/pki

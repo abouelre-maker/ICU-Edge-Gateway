@@ -24,12 +24,15 @@ def get_mllp_enabled() -> bool:
 
 
 def get_mllp_host() -> str:
-    """MLLP_HOST (default: 0.0.0.0 — edge appliance listens for LAN-side monitors)."""
-    # Bandit B104 (hardcoded_bind_all_interfaces): intentional -- this is an
-    # edge appliance that must accept MLLP connections from any bedside
-    # monitor on the ICU LAN, not a single known peer. Overridable via
-    # MLLP_HOST for deployments that want to narrow this.
-    return os.getenv("MLLP_HOST", "0.0.0.0")  # nosec B104
+    """
+    MLLP_HOST (default: 127.0.0.1).
+
+    F01-2 (HD-E6 option 1, approved 2026-11-19): loopback by default. An edge
+    appliance that must accept bedside monitors on the ICU LAN sets
+    MLLP_HOST explicitly (e.g. the LAN interface, or 0.0.0.0) together with
+    MLLP_ALLOWED_CLIENTS, so wide exposure is always a deliberate choice.
+    """
+    return os.getenv("MLLP_HOST", "127.0.0.1")
 
 
 def get_mllp_port() -> int:
@@ -370,6 +373,115 @@ def get_reattestation_interval_seconds() -> float:
             f"REATTESTATION_INTERVAL_SECONDS must be positive. Got {interval}."
         )
     return interval
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a positive integer. Got {raw!r}.") from exc
+    if value <= 0:
+        raise ValueError(f"{name} must be a positive integer. Got {value}.")
+    return value
+
+
+def get_max_request_body_bytes() -> int:
+    """MAX_REQUEST_BODY_BYTES (default 262144 = 256 KiB). F-02 DoS control."""
+    return _positive_int_env("MAX_REQUEST_BODY_BYTES", 262_144)
+
+
+def get_hl7_max_obx() -> int:
+    """HL7_MAX_OBX_PER_MESSAGE (default 200). F-02 DoS control."""
+    return _positive_int_env("HL7_MAX_OBX_PER_MESSAGE", 200)
+
+
+def get_max_waveform_samples() -> int:
+    """MAX_WAVEFORM_SAMPLES (default 20000 ≈ 80 s at 250 Hz). F-02 DoS control."""
+    return _positive_int_env("MAX_WAVEFORM_SAMPLES", 20_000)
+
+
+_MIN_API_KEY_LENGTH = 32
+
+
+def get_gateway_api_keys() -> list[str]:
+    """GATEWAY_API_KEYS: comma-separated API keys (F-01). Empty list if unset."""
+    raw = os.getenv("GATEWAY_API_KEYS", "")
+    return [k.strip() for k in raw.split(",") if k.strip()]
+
+
+def validate_gateway_auth_config() -> None:
+    """
+    Fail-closed startup check (F-01): refuse to start without at least one
+    API key of >= 32 characters. Never falls back to open access.
+    """
+    keys = get_gateway_api_keys()
+    if not keys:
+        raise RuntimeError(
+            "GATEWAY_API_KEYS must be set: the ingest API refuses to start without "
+            "authentication (F-01)."
+        )
+    short = [i for i, k in enumerate(keys) if len(k) < _MIN_API_KEY_LENGTH]
+    if short:
+        raise RuntimeError(
+            f"GATEWAY_API_KEYS entries {short} are shorter than "
+            f"{_MIN_API_KEY_LENGTH} characters (F-01)."
+        )
+
+
+def get_mqtt_topic_key() -> bytes:
+    """
+    MQTT_TOPIC_KEY (F-04): secret for the opaque per-patient MQTT topic
+    segment. Required (>= 32 characters) whenever MQTT is enabled; the
+    gateway refuses to start without it rather than put identifiers in topics.
+    """
+    raw = os.getenv("MQTT_TOPIC_KEY", "")
+    if len(raw) < _MIN_API_KEY_LENGTH:
+        raise RuntimeError(
+            "MQTT_TOPIC_KEY must be set to at least "
+            f"{_MIN_API_KEY_LENGTH} characters when MQTT is enabled (F-04)."
+        )
+    return raw.encode("utf-8")
+
+
+def get_mllp_allowed_networks() -> tuple[str, ...]:
+    """
+    MLLP_ALLOWED_CLIENTS: comma-separated CIDRs allowed to connect (F-01).
+    Unset => loopback only (fail closed): a deployment must name its monitor
+    / interface-engine networks explicitly.
+    """
+    import ipaddress  # noqa: PLC0415
+
+    raw = os.getenv("MLLP_ALLOWED_CLIENTS", "").strip()
+    nets = tuple(n.strip() for n in raw.split(",") if n.strip()) or ("127.0.0.0/8", "::1/128")
+    for n in nets:
+        ipaddress.ip_network(n, strict=False)  # raises ValueError on a bad entry
+    return nets
+
+
+def validate_news2_scoring_config() -> None:
+    """
+    Fail-closed startup check (A2, decision Q1(b)): the NEWS2 module may only
+    run with every per-parameter staleness window configured. No clinical
+    default exists anywhere in src/ — the values belong to a clinical safety
+    reviewer (HD-E7). Raises RuntimeError naming every missing variable, or the
+    ValueError of the first invalid one.
+    """
+    import os  # noqa: PLC0415 - local to keep this module's import surface unchanged
+
+    from domain.services.scoring_gate import (  # noqa: PLC0415
+        policy_from_environment,
+        window_env_names,
+    )
+
+    missing = [n for n in window_env_names() if not os.environ.get(n, "").strip()]
+    if missing:
+        raise RuntimeError(
+            "NEWS2 scoring refuses to start: staleness windows not configured: "
+            + ", ".join(missing)
+            + " (clinical values; see docs/assessment/HUMAN_DECISIONS.md HD-E7)."
+        )
+    policy_from_environment()  # raises ValueError on an invalid value
 
 
 def get_cors_allowed_origins() -> list[str]:

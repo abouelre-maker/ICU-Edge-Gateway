@@ -32,6 +32,7 @@ authenticated by default rather than by remembering to opt in.
 
 from __future__ import annotations
 
+import hashlib
 import secrets as _secrets
 from typing import Any
 
@@ -43,6 +44,10 @@ from infrastructure.fhir.subscription import create_subscription_from_fhir_reque
 from infrastructure.streaming.subscription_registry import SubscriptionRegistry
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
+
+
+def _sha256(value: str) -> bytes:
+    return hashlib.sha256(value.encode("utf-8", errors="surrogateescape")).digest()
 
 
 def _require_registration_secret(request: Request) -> None:
@@ -65,8 +70,10 @@ def _require_registration_secret(request: Request) -> None:
         ) from exc
 
     scheme, _, presented = request.headers.get("Authorization", "").partition(" ")
+    # F-06: compare SHA-256 digests of bytes -- compare_digest on str raises
+    # TypeError for non-ASCII input, which surfaced as a 500.
     if scheme.lower() != "bearer" or not presented or not _secrets.compare_digest(
-        presented, expected
+        _sha256(presented), _sha256(expected)
     ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

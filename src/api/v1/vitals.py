@@ -12,23 +12,33 @@ The Pydantic model enforces this at the API boundary.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
 import structlog
+from config import get_max_waveform_samples
 from domain.entities.device_context import DeviceContext, MonitorVendor
-from domain.entities.patient_context import PatientContext, SpO2Scale
+from domain.entities.patient_context import (
+    PATIENT_ID_PATTERN,
+    PatientContext,
+    SpO2Scale,
+)
+from domain.entities.score_outcome import Finding, ReasonCode
 from domain.entities.vital_sign import (
     AVPULevel,
     VitalSignSample,
     VitalSignType,
     VitalSignUnit,
 )
-from domain.services.vitals_orchestrator import VitalsOrchestrator
+from domain.services.unit_normaliser import normalise
+from domain.services.vitals_orchestrator import VitalsAnalysisResult, VitalsOrchestrator
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
 from infrastructure.fhir.bundle_assembler import BundleAssembler
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from api.v1.outcome_headers import outcome_headers
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
@@ -78,7 +88,11 @@ class VitalSignPayload(BaseModel):
     )
     waveform: list[float] | None = Field(
         None,
-        description="Optional raw waveform samples for DSP processing.",
+        max_length=get_max_waveform_samples(),
+        description=(
+            "Optional raw waveform samples for DSP processing "
+            "(bounded by MAX_WAVEFORM_SAMPLES; F-02)."
+        ),
     )
     sampling_rate_hz: float | None = Field(
         None,
@@ -154,7 +168,12 @@ class VitalsIngestionRequest(BaseModel):
     patient_id: str = Field(
         ...,
         min_length=1,
-        description="FHIR Patient logical ID. Required for all FHIR resource references.",
+        max_length=64,
+        pattern=PATIENT_ID_PATTERN,
+        description=(
+            "FHIR Patient logical ID: 1-64 characters from [A-Za-z0-9._-] "
+            "(F-04: safe in FHIR references, logs and MQTT topics)."
+        ),
     )
     samples: list[VitalSignPayload] = Field(
         ...,
@@ -234,12 +253,26 @@ async def ingest_vitals(
 
     # ── Convert Pydantic payloads → domain VitalSignSamples ──────────────────
     samples: list[VitalSignSample] = []
+    unit_findings: list[Finding] = []
     for item in payload.samples:
+        # A4: the unit field is honoured — converted (°F → °C) or, if it does
+        # not fit the vital sign type, the sample is excluded and reported.
+        normalised = normalise(item.vital_sign_type, item.value, item.unit)
+        if normalised is None:
+            unit_findings.append(
+                Finding(
+                    ReasonCode.AMBIGUOUS_UNIT,
+                    item.vital_sign_type,
+                    f"Unit '{item.unit.value}' is not valid for this observation type.",
+                )
+            )
+            continue
+        value, unit = normalised
         try:
             sample = VitalSignSample(
                 vital_sign_type=item.vital_sign_type,
-                value=item.value,
-                unit=item.unit,
+                value=value,
+                unit=unit,
                 timestamp=item.timestamp,
                 avpu_level=item.avpu_level,
                 waveform=tuple(item.waveform) if item.waveform else None,
@@ -271,18 +304,13 @@ async def ingest_vitals(
         )
 
     # ── Domain Pipeline ───────────────────────────────────────────────────────
-    analysis_result = _orchestrator.analyse(
-        samples=samples,
-        context=patient_context,
+    # F-02: DSP / NEWS2 / FHIR assembly run in a worker thread.
+    analysis_result, bundle = await asyncio.to_thread(
+        _run_pipeline, samples, patient_context, device_context, payload.encounter_id,
+        unit_findings,
     )
 
-    # ── FHIR Bundle Assembly ──────────────────────────────────────────────────
-    bundle = _assembler.assemble(
-        result=analysis_result,
-        patient_context=patient_context,
-        device_context=device_context,
-        encounter_id=payload.encounter_id,
-    )
+    # ── FHIR Bundle Assembly (done in _run_pipeline) ──────────────────────────────────────────────────
 
     log.info(
         "api.vitals.complete",
@@ -294,6 +322,7 @@ async def ingest_vitals(
 
     # Build response headers
     headers: dict[str, str] = {
+        **outcome_headers(analysis_result),
         "X-CDS-Advisory-Only": "true",
         "X-Pipeline-Duration-Ms": str(round(analysis_result.processing_duration_ms, 2)),
         "X-Warning-Count": str(len(analysis_result.pipeline_warnings)),
@@ -327,3 +356,25 @@ async def ingest_vitals(
         media_type="application/fhir+json",
         headers=headers,
     )
+
+
+def _run_pipeline(
+    samples: list[VitalSignSample],
+    patient_context: PatientContext,
+    device_context: DeviceContext | None,
+    encounter_id: str | None,
+    unit_findings: list[Finding],
+) -> tuple[VitalsAnalysisResult, dict[str, Any]]:
+    """Synchronous DSP → NEWS2 → FHIR pipeline; runs in a worker thread (F-02)."""
+    analysis_result = _orchestrator.analyse(
+        samples=samples,
+        context=patient_context,
+        upstream_findings=unit_findings,
+    )
+    bundle = _assembler.assemble(
+        result=analysis_result,
+        patient_context=patient_context,
+        device_context=device_context,
+        encounter_id=encounter_id,
+    )
+    return analysis_result, bundle

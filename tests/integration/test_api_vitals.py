@@ -398,7 +398,14 @@ class TestVitalsHazardDsp007NanExcludedNotOpaqueFailure:
         self, client: AsyncClient
     ) -> None:
         response = await client.post("/api/v1/vitals", json=self.NAN_SPO2_PAYLOAD)
-        notes = " | ".join(n["text"] for n in response.json().get("note", []))
+        # H-01 (approved 2026-11-19): Bundle.note is not valid R4; the
+        # warnings now travel as OperationOutcome issue diagnostics.
+        notes = " | ".join(
+            issue.get("diagnostics", "")
+            for e in response.json()["entry"]
+            if e["resource"]["resourceType"] == "OperationOutcome"
+            for issue in e["resource"]["issue"]
+        )
         assert "SPO2" in notes, (
             "Bundle.note must explicitly name SPO2 as the excluded "
             "parameter -- a clinician reading the Bundle directly (not "

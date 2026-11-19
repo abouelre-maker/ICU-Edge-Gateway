@@ -85,6 +85,9 @@ class VitalSignSample:
     sampling_rate_hz: float | None = None  # Required when waveform is set
     is_artifact_flagged: bool = False
     device_id: str | None = None  # FHIR Device/{id} reference
+    # HL7 OBX-11 result status: F final, P preliminary, C corrected, "" absent
+    # (A3 / N-02). Non-HL7 sources (JSON /vitals) are final by definition.
+    result_status: str = "F"
 
     def __post_init__(self) -> None:
         """

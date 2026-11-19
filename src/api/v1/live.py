@@ -26,6 +26,8 @@ import structlog
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from infrastructure.streaming.live_dashboard_channel import LiveDashboardChannel
 
+from api.auth import authorize_websocket
+
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["Live Dashboard"])
@@ -45,6 +47,9 @@ async def live_vitals_ws(websocket: WebSocket) -> None:
     receiver — any inbound message, which dashboard clients aren't expected
     to send but which does not itself break the connection) ends the other.
     """
+    # F-08: valid key + allowed Origin, else close 1008 before accepting.
+    if not await authorize_websocket(websocket):
+        return
     channel: LiveDashboardChannel = websocket.app.state.live_dashboard_channel
     queue = await channel.connect(websocket)
 

@@ -404,10 +404,13 @@ class TestBundleAssembler:
         ]
         assert len(news2_entries) == 1
 
-    def test_bundle_total_matches_entry_count(self) -> None:
+    def test_collection_bundle_has_no_total(self) -> None:
+        # H-02 (approved 2026-11-19): was "total == entry count"; FHIR R4
+        # bdl-1 allows Bundle.total only on searchset and history bundles.
         result = self._make_full_result()
         bundle = _BUNDLE_ASSEMBLER.assemble(result, _PATIENT_CTX, _DEVICE_CTX)
-        assert bundle["total"] == len(bundle["entry"])
+        assert bundle["type"] == "collection"
+        assert "total" not in bundle
 
     def test_bundle_without_device_has_no_device_entry(self) -> None:
         result = self._make_full_result()

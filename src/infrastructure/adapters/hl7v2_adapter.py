@@ -10,8 +10,10 @@ Supported protocol variants:
   - NA (Numeric Array) and ED (Encapsulated Data) waveform: parsed into
     VitalSignSample.waveform for the DSP artifact-rejection pipeline. See
     _build_waveform_sample for the exact supported subset and known limits.
-  - Vendor dialects: Philips IntelliVue / GE CARESCAPE / Dräger Infinity /
-    Mindray Beneview / Nihon Kohden / Generic (LOINC fallback)
+  - OBX-3 identifiers: LOINC, plus a small table of proprietary codes whose
+    mappings are INFERRED, not taken from any vendor specification or observed
+    traffic (vendor_codes.json, provenance "inferred-UNVERIFIED"; V-01). No
+    specific monitor model or vendor interface is supported or verified.
 
 IEC 62304 §5.3: GoF Adapter pattern — isolates legacy protocol complexity
 from the pure domain model.
@@ -34,6 +36,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import dataclasses
 import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -41,24 +44,30 @@ from typing import Final
 
 import structlog
 from domain.entities.device_context import DeviceContext, MonitorVendor
+from domain.entities.patient_context import is_safe_patient_id
+from domain.entities.score_outcome import Finding, ReasonCode
 from domain.entities.vital_sign import (
     AVPULevel,
     VitalSignSample,
     VitalSignType,
     VitalSignUnit,
 )
+from domain.services.unit_normaliser import KPA_TO_MMHG, normalise
 from hl7apy.parser import parse_message as _hl7apy_parse
+
+from infrastructure.adapters.vendor_codes import load_vendor_codes
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
 # ── Code Mapping Tables ────────────────────────────────────────────────────────
 
 # LOINC observation identifiers → VitalSignType.
-# Source: LOINC.org — codes validated against NLM VSAC value sets.
+# LOINC codes (loinc.org). Mapping choices are this project's own; TODO-VERIFY
+# each against the published LOINC term before any external claim.
 _LOINC_TO_TYPE: Final[dict[str, VitalSignType]] = {
     "8867-4": VitalSignType.HEART_RATE,  # Heart rate
     "59408-5": VitalSignType.SPO2,  # SpO2 by pulse ox
-    "2708-6": VitalSignType.SPO2,  # Oxygen saturation (alternate)
+    # A5: 2708-6 (arterial-blood saturation, SaO2) removed — it is not SpO2.
     "9279-1": VitalSignType.RESPIRATORY_RATE,  # Respiratory rate
     "8480-6": VitalSignType.SYSTOLIC_BP,  # Systolic BP
     "8462-4": VitalSignType.DIASTOLIC_BP,  # Diastolic BP
@@ -69,58 +78,14 @@ _LOINC_TO_TYPE: Final[dict[str, VitalSignType]] = {
     "3151-8": VitalSignType.SUPPLEMENTAL_O2,  # Inhaled O2 flow rate
 }
 
-# Vendor-specific proprietary OBX-3 identifiers → VitalSignType.
-# Covers Philips IntelliVue (MX/MP series), GE CARESCAPE B/DASH,
-# Dräger Infinity, Mindray Beneview, and Nihon Kohden.
+# Proprietary OBX-3 identifiers → VitalSignType (V-01). Loaded from the data
+# file vendor_codes.json by a strict loader; every entry there carries a
+# provenance field and ALL are currently "inferred-UNVERIFIED" — none was
+# taken from a vendor interface specification or observed traffic.
+# A5 removals (SaO2 / tissue / arterial codes) and the blocked T1/T2 item
+# (HD-E6 A5-1) are recorded in that file's _comment and regulatory/findings/A5.md.
 # ISO 14971 HAZARD-PROTO-001: Unlisted codes → type=None → OBX skipped.
-_VENDOR_TO_TYPE: Final[dict[str, VitalSignType]] = {
-    # Heart Rate
-    "HR": VitalSignType.HEART_RATE,
-    "PULSE": VitalSignType.HEART_RATE,
-    "HEART RATE": VitalSignType.HEART_RATE,
-    "PR": VitalSignType.HEART_RATE,  # Pulse Rate (GE)
-    # SpO2
-    "SPO2": VitalSignType.SPO2,
-    "SO2": VitalSignType.SPO2,
-    "SAO2": VitalSignType.SPO2,
-    "STO2": VitalSignType.SPO2,
-    "SPO2-%": VitalSignType.SPO2,
-    # Respiratory Rate
-    "RESP": VitalSignType.RESPIRATORY_RATE,
-    "RR": VitalSignType.RESPIRATORY_RATE,
-    "RESPRATE": VitalSignType.RESPIRATORY_RATE,
-    # Systolic BP (NIBP = Non-Invasive, ABP = Arterial)
-    "NIBP-S": VitalSignType.SYSTOLIC_BP,
-    "NIBP_S": VitalSignType.SYSTOLIC_BP,
-    "NBP-S": VitalSignType.SYSTOLIC_BP,
-    "NBP_S": VitalSignType.SYSTOLIC_BP,
-    "SBP": VitalSignType.SYSTOLIC_BP,
-    "ABP-S": VitalSignType.SYSTOLIC_BP,
-    "ART-S": VitalSignType.SYSTOLIC_BP,
-    # Diastolic BP
-    "NIBP-D": VitalSignType.DIASTOLIC_BP,
-    "NIBP_D": VitalSignType.DIASTOLIC_BP,
-    "NBP-D": VitalSignType.DIASTOLIC_BP,
-    "NBP_D": VitalSignType.DIASTOLIC_BP,
-    "DBP": VitalSignType.DIASTOLIC_BP,
-    "ABP-D": VitalSignType.DIASTOLIC_BP,
-    "ART-D": VitalSignType.DIASTOLIC_BP,
-    # Temperature
-    "TEMP": VitalSignType.TEMPERATURE_CELSIUS,
-    "T1": VitalSignType.TEMPERATURE_CELSIUS,
-    "T2": VitalSignType.TEMPERATURE_CELSIUS,
-    "TEMPBLA": VitalSignType.TEMPERATURE_CELSIUS,  # Bladder temp (Philips)
-    "TEMPCORE": VitalSignType.TEMPERATURE_CELSIUS,
-    # Consciousness (AVPU)
-    "AVPU": VitalSignType.CONSCIOUSNESS,
-    "LOC": VitalSignType.CONSCIOUSNESS,
-    "CONS": VitalSignType.CONSCIOUSNESS,
-    # Supplemental O2
-    "FIO2": VitalSignType.SUPPLEMENTAL_O2,  # FiO2 > 0.21 = on O2
-    "O2FLOW": VitalSignType.SUPPLEMENTAL_O2,
-    "O2DELIVERY": VitalSignType.SUPPLEMENTAL_O2,
-    "AIROROXYGEN": VitalSignType.SUPPLEMENTAL_O2,
-}
+_VENDOR_TO_TYPE: Final[dict[str, VitalSignType]] = load_vendor_codes()
 
 # MSH-3 Sending Application → MonitorVendor.
 # Case-insensitive substring match against upper-cased MSH-3 value.
@@ -160,6 +125,29 @@ _AVPU_STRINGS: Final[dict[str, AVPULevel]] = {
     "NEW_CONFUSION": AVPULevel.NEW_CONFUSION,
     "ACVPU-C": AVPULevel.NEW_CONFUSION,
 }
+
+# OBX-6 unit strings (lower-cased) → VitalSignUnit.
+_UNIT_MAP: Final[dict[str, VitalSignUnit]] = {
+    "/min": VitalSignUnit.BPM,
+    "bpm": VitalSignUnit.BPM,
+    "beats/min": VitalSignUnit.BPM,
+    "breaths/min": VitalSignUnit.BREATHS_PER_MIN,
+    "rpm": VitalSignUnit.BREATHS_PER_MIN,
+    "%": VitalSignUnit.PERCENT,
+    "percent": VitalSignUnit.PERCENT,
+    "mmhg": VitalSignUnit.MMHG,
+    "mm[hg]": VitalSignUnit.MMHG,
+    "cel": VitalSignUnit.CELSIUS,
+    "degc": VitalSignUnit.CELSIUS,
+    "celsius": VitalSignUnit.CELSIUS,
+    "[degf]": VitalSignUnit.FAHRENHEIT,
+    "degf": VitalSignUnit.FAHRENHEIT,
+    "f": VitalSignUnit.FAHRENHEIT,
+}
+
+# A4: "39,5" is a decimal comma, not 39.
+_DECIMAL_COMMA: Final = re.compile(r"-?\d+,\d+")
+_COMPARATORS: Final = frozenset({"<", ">", "<=", ">=", "<>"})
 
 # VitalSignType → default VitalSignUnit when OBX-6 is absent or unmapped.
 _DEFAULT_UNIT: Final[dict[VitalSignType, VitalSignUnit]] = {
@@ -212,20 +200,29 @@ class HL7ParseResult:
         samples:            Parsed VitalSignSample objects (one per valid OBX).
         patient_id:         Extracted from PID-3; "UNKNOWN" if absent.
         detected_vendor:    MonitorVendor from MSH-3 or device_context.
-        message_timestamp:  MSH-7 timestamp (UTC); now() if absent.
+        message_timestamp:  MSH-7 timestamp (UTC); None if absent or unparseable
+                            (A2 / N-03: never replaced by now()).
         skipped_obx_count:  OBX segments skipped due to unknown type or error.
         parse_warnings:     Ordered audit log from parsing.
+        findings:           Machine-readable reason codes (Phase 1 contract).
     """
 
     samples: tuple[VitalSignSample, ...]
     patient_id: str
     detected_vendor: MonitorVendor
-    message_timestamp: datetime
+    message_timestamp: datetime | None
     skipped_obx_count: int
     parse_warnings: tuple[str, ...]
+    findings: tuple[Finding, ...] = ()
+    message_control_id: str = ""  # MSH-10, echoed in MSA-2 by the MLLP ACK (A8)
+    message_type: str = ""  # MSH-9 components 1-2, e.g. "ORU^R01" (A7)
 
 
 # ── Adapter Implementation ─────────────────────────────────────────────────────
+
+
+_DEFAULT_MAX_OBX: Final = 200  # F-02 DoS cap (engineering, configurable)
+_DEFAULT_MAX_WAVEFORM_SAMPLES: Final = 20_000
 
 
 class HL7v2Adapter:
@@ -237,6 +234,14 @@ class HL7v2Adapter:
     Design guarantee: never raises on a single bad OBX segment — skips + warns.
     Only raises ValueError when the entire HL7 message is syntactically invalid.
     """
+
+    def __init__(
+        self,
+        max_obx: int = _DEFAULT_MAX_OBX,
+        max_waveform_samples: int = _DEFAULT_MAX_WAVEFORM_SAMPLES,
+    ) -> None:
+        self._max_obx = max_obx
+        self._max_waveform_samples = max_waveform_samples
 
     def parse(
         self,
@@ -260,6 +265,28 @@ class HL7v2Adapter:
         # Normalise line endings — HL7 canonical separator is CR (\r)
         normalised = raw_hl7.replace("\r\n", "\r").replace("\n", "\r")
 
+        # A7: this adapter splits on the standard delimiters. A message that
+        # declares different MSH-1/MSH-2 characters is rejected explicitly
+        # rather than silently mis-split.
+        stripped = normalised.lstrip()
+        if stripped.startswith("MSH") and (
+            stripped[3:4] != "|"
+            or stripped[4:8] != "^~\\&"
+            or stripped[8:9] not in {"|", "#"}
+        ):
+            raise ValueError(
+                "Non-standard HL7 encoding characters (MSH-1/MSH-2) are not "
+                "supported; expected '|' and '^~\\&'."
+            )
+
+        # F-02: bound parser work before hl7apy sees the message.
+        obx_count = sum(1 for s in stripped.split("\r") if s.startswith("OBX|"))
+        if obx_count > self._max_obx:
+            raise ValueError(
+                f"Message has {obx_count} OBX segments; the limit is "
+                f"{self._max_obx} per message (F-02)."
+            )
+
         try:
             msg = _hl7apy_parse(
                 normalised,
@@ -273,10 +300,27 @@ class HL7v2Adapter:
             ) from exc
 
         warnings: list[str] = []
+        findings: list[Finding] = []
 
         # ── Message-Level Metadata ─────────────────────────────────────────────
         msg_ts = self._extract_message_timestamp(msg)
-        patient_id = self._extract_patient_id(msg, warnings)
+        segments = [s for s in stripped.split("\r") if s]
+        msh = segments[0].split("|") if segments and segments[0].startswith("MSH") else []
+        msh9 = [c.strip() for c in (msh[8] if len(msh) > 8 else "").split("^")]
+        message_type = "^".join(msh9[:2]) if msh9[0] else ""
+        control_id = _decode_escapes(msh[9].strip()) if len(msh) > 9 else ""
+        if msh9[:2] != ["ORU", "R01"]:
+            warnings.append(
+                f"[MSH-9] Message type '{message_type or 'absent'}' is not ORU^R01."
+            )
+            findings.append(
+                Finding(
+                    ReasonCode.UNSUPPORTED_MESSAGE_TYPE,
+                    None,
+                    f"MSH-9 message type '{message_type or 'absent'}' is not ORU^R01.",
+                )
+            )
+        patient_id = _extract_patient_id_raw(segments, warnings, findings)
         vendor = (
             device_context.vendor
             if device_context is not None
@@ -304,6 +348,7 @@ class HL7v2Adapter:
                     patient_id=patient_id,
                     msg_timestamp=msg_ts,
                     warnings=warnings,
+                    findings=findings,
                 )
                 if sample is not None:
                     samples.append(sample)
@@ -314,6 +359,8 @@ class HL7v2Adapter:
                 warn = f"[OBX-ERROR] Unexpected error parsing OBX segment: {exc}"
                 warnings.append(warn)
                 log.warning("hl7v2_adapter.obx.unexpected_error", error=str(exc))
+
+        samples = _apply_corrections(samples)
 
         log.info(
             "hl7v2_adapter.parse.complete",
@@ -328,6 +375,9 @@ class HL7v2Adapter:
             message_timestamp=msg_ts,
             skipped_obx_count=skipped,
             parse_warnings=tuple(warnings),
+            findings=tuple(findings),
+            message_control_id=control_id,
+            message_type=message_type,
         )
 
     # ── Private: Message-Level Extraction ─────────────────────────────────────
@@ -351,34 +401,21 @@ class HL7v2Adapter:
 
         return MonitorVendor.GENERIC
 
-    def _extract_patient_id(
-        self,
-        msg: object,
-        warnings: list[str],
-    ) -> str:
-        """Extract PID-3 (Patient Identifier List) component 1."""
-        for child in msg.children:  # type: ignore[attr-defined]
-            if getattr(child, "name", "").upper() == "PID":
-                pid_3 = _safe_field(child, "pid_3")
-                if pid_3:
-                    # PID-3 is CX type: component 1 is the ID value
-                    return pid_3.split("^")[0].strip() or "UNKNOWN"
-                break
 
-        warnings.append(
-            "[PID-MISSING] PID-3 Patient Identifier absent — using 'UNKNOWN'."
-        )
-        return "UNKNOWN"
+    def _extract_message_timestamp(self, msg: object) -> datetime | None:
+        """
+        Extract MSH-7 (Date/Time of Message).
 
-    def _extract_message_timestamp(self, msg: object) -> datetime:
-        """Extract MSH-7 (Date/Time of Message). Defaults to UTC now."""
+        A2 / N-03: returns None when MSH-7 is absent or unparseable. It is never
+        replaced by the current time — that would make corrupt data look fresh.
+        """
         for child in msg.children:  # type: ignore[attr-defined]
             if getattr(child, "name", "").upper() == "MSH":
                 ts_str = _safe_field(child, "msh_7")
                 if ts_str:
-                    return _parse_hl7_datetime(ts_str)
+                    return _parse_hl7_datetime_strict(ts_str)
                 break
-        return datetime.now(tz=timezone.utc)
+        return None
 
     # ── Private: OBX Segment Parsing ──────────────────────────────────────────
 
@@ -388,8 +425,9 @@ class HL7v2Adapter:
         vendor: MonitorVendor,
         device_id: str,
         patient_id: str,  # noqa: ARG002  # reserved for future subject reference
-        msg_timestamp: datetime,
+        msg_timestamp: datetime | None,
         warnings: list[str],
+        findings: list[Finding] | None = None,
     ) -> VitalSignSample | None:
         """
         Parse a single OBX segment into a VitalSignSample.
@@ -401,23 +439,64 @@ class HL7v2Adapter:
         - OBX-5 value is empty or unparseable
         - OBX-11 result status is not F (Final) or P (Preliminary)
 
-        IEC 62304 REQ-HL7-002: Only Final (F) and Preliminary (P) observations
-        are accepted. Corrected (C) and entered-in-error (W) are excluded.
+        A3: Final (F), Preliminary (P) and Corrected (C) observations are
+        accepted; a C value replaces an earlier F/P of the same type in the
+        same message (see _apply_corrections) and raises CORRECTION_PENDING so
+        downstream consumers supersede previously sent results. An absent
+        OBX-11 is accepted but reported (MISSING_RESULT_STATUS). Any other
+        status (e.g. W entered-in-error, X, I, D) is excluded.
         """
-        # OBX-11: Result Status — only accept F (Final) and P (Preliminary)
-        status = _safe_field(obx, "obx_11").upper().strip()
-        if status and status not in {"F", "P"}:
+        raw_status = _safe_field(obx, "obx_11").strip()
+        status = raw_status.upper()
+        if status and status not in {"F", "P", "C"}:
             warnings.append(
-                f"[OBX-SKIP] OBX-11 status '{status}' is not F/P — skipped. "
+                f"[OBX-SKIP] OBX-11 status '{status}' is not F/P/C — skipped. "
                 "IEC 62304 REQ-HL7-002."
             )
             return None
+        if raw_status and raw_status != status:
+            warnings.append(f"[OBX-STATUS] OBX-11 '{raw_status}' normalised to '{status}'.")
+        sample = self._parse_obx_body(
+            obx, vendor, device_id, patient_id, msg_timestamp, warnings, findings
+        )
+        if sample is None:
+            return None
+        if findings is not None:
+            if status == "C":
+                findings.append(
+                    Finding(
+                        ReasonCode.CORRECTION_PENDING,
+                        sample.vital_sign_type,
+                        "Corrected result: supersedes any previously sent value.",
+                    )
+                )
+            elif not status:
+                findings.append(
+                    Finding(
+                        ReasonCode.MISSING_RESULT_STATUS,
+                        sample.vital_sign_type,
+                        "OBX-11 result status absent.",
+                    )
+                )
+        return dataclasses.replace(sample, result_status=status)
+
+    def _parse_obx_body(
+        self,
+        obx: object,
+        vendor: MonitorVendor,
+        device_id: str,
+        patient_id: str,  # noqa: ARG002
+        msg_timestamp: datetime | None,
+        warnings: list[str],
+        findings: list[Finding] | None,
+    ) -> VitalSignSample | None:
+        """OBX-3/5/6/14 parsing (status already handled by _parse_obx)."""
 
         # OBX-3: Observation Identifier → VitalSignType.
         # Resolved before the value-type branch below so waveform handling can
         # consult the per-type sampling-rate default table.
         obx_3_str = _safe_field(obx, "obx_3")
-        vital_type = self._resolve_vital_type(obx_3_str, vendor, warnings)
+        vital_type = self._resolve_vital_type(obx_3_str, vendor, warnings, findings)
         if vital_type is None:
             return None
 
@@ -425,12 +504,17 @@ class HL7v2Adapter:
         # continuous waveform data and are routed to the dedicated builder.
         value_type = _safe_field(obx, "obx_2").upper().strip()
         if value_type in {"NA", "ED"}:
+            obs_timestamp = _resolve_obs_timestamp(
+                obx, msg_timestamp, vital_type, warnings, findings
+            )
+            if obs_timestamp is None:
+                return None
             return self._build_waveform_sample(
                 obx=obx,
                 value_type=value_type,
                 vital_type=vital_type,
                 device_id=device_id,
-                msg_timestamp=msg_timestamp,
+                msg_timestamp=obs_timestamp,
                 warnings=warnings,
             )
 
@@ -442,33 +526,77 @@ class HL7v2Adapter:
             )
             return None
 
-        # OBX-6: Units
-        unit = self._resolve_unit(
-            unit_str=_safe_field(obx, "obx_6"),
-            vital_type=vital_type,
+        # OBX-14: Date/Time of Observation (message timestamp as fallback).
+        # A2 / N-03: absent or unparseable ⇒ UNPARSEABLE_TIMESTAMP, never now().
+        obs_timestamp = _resolve_obs_timestamp(
+            obx, msg_timestamp, vital_type, warnings, findings
         )
-
-        # OBX-14: Date/Time of Observation (use message timestamp as fallback)
-        obs_ts_str = _safe_field(obx, "obx_14")
-        obs_timestamp = _parse_hl7_datetime(obs_ts_str) if obs_ts_str else msg_timestamp
+        if obs_timestamp is None:
+            return None
 
         # Parse value based on VitalSignType
         if vital_type is VitalSignType.CONSCIOUSNESS:
             return self._build_consciousness_sample(
-                raw_value, obs_timestamp, device_id, warnings
+                raw_value, obs_timestamp, device_id, warnings, findings
             )
 
         if vital_type is VitalSignType.SUPPLEMENTAL_O2:
-            return self._build_o2_sample(raw_value, obs_timestamp, device_id, warnings)
+            return self._build_o2_sample(
+                raw_value,
+                obs_timestamp,
+                device_id,
+                warnings,
+                unit_str=_safe_field(obx, "obx_6"),
+                findings=findings,
+            )
 
-        # All other types: numeric value
-        numeric = _parse_numeric(raw_value)
+        # All other types: numeric value (A4 — never silently misread)
+        def _reject(code: ReasonCode, reason: str) -> None:
+            warnings.append(f"[OBX-SKIP] {vital_type.name}: {reason} Segment skipped.")
+            if findings is not None:
+                findings.append(Finding(code, vital_type, reason))
+
+        non_exact = _non_exact_reason(raw_value)
+        if non_exact is not None:
+            _reject(ReasonCode.NON_EXACT_VALUE, non_exact)
+            return None
+        text = raw_value.replace(",", ".") if _DECIMAL_COMMA.fullmatch(raw_value) else raw_value
+        numeric = _parse_numeric(text)
         if numeric is None:
             warnings.append(
                 f"[OBX-SKIP] Cannot parse OBX-5 '{raw_value}' as a number "
                 f"for {vital_type.name}. Segment skipped."
             )
             return None
+
+        # OBX-6: absent ⇒ documented per-type default; unrecognised ⇒ ambiguous.
+        unit_text = _safe_field(obx, "obx_6").split("^")[0].strip().lower()
+        if not unit_text:
+            unit = _DEFAULT_UNIT.get(vital_type, VitalSignUnit.PERCENT)
+        elif unit_text == "kpa" and vital_type in {
+            VitalSignType.SYSTOLIC_BP,
+            VitalSignType.DIASTOLIC_BP,
+        }:
+            numeric, unit = numeric * KPA_TO_MMHG, VitalSignUnit.MMHG
+            warnings.append(f"[OBX-UNIT] {vital_type.name} converted from kPa to mmHg.")
+        elif unit_text in _UNIT_MAP:
+            unit = _UNIT_MAP[unit_text]
+        else:
+            _reject(ReasonCode.AMBIGUOUS_UNIT, f"Unrecognised unit '{unit_text}'.")
+            return None
+        normalised = normalise(vital_type, numeric, unit)
+        if normalised is None:
+            _reject(
+                ReasonCode.AMBIGUOUS_UNIT,
+                f"Unit '{unit.value}' is not valid for this observation type.",
+            )
+            return None
+        if normalised[1] is not unit:
+            warnings.append(
+                f"[OBX-UNIT] {vital_type.name} converted from {unit.value} "
+                f"to {normalised[1].value}."
+            )
+        numeric, unit = normalised
 
         return VitalSignSample(
             vital_sign_type=vital_type,
@@ -483,14 +611,17 @@ class HL7v2Adapter:
         obx_3: str,
         vendor: MonitorVendor,
         warnings: list[str],
+        findings: list[Finding] | None = None,
     ) -> VitalSignType | None:
         """
-        Map OBX-3 identifier to VitalSignType.
+        Map OBX-3 identifier to VitalSignType, honouring the coding system (A5).
 
-        Resolution order:
-          1. LOINC code (OBX-3.3 coding system = "LN" or "LOINC")
-          2. Vendor proprietary code (normalized to uppercase)
-          3. LOINC lookup of OBX-3.1 regardless of system (best-effort)
+        Resolution:
+          - OBX-3.3 = "LN"/"LOINC": LOINC table only.
+          - OBX-3.3 absent: LOINC table, then the proprietary-code table.
+          - Any other system: proprietary-code table, then — INTERIM, pending
+            BLOCKED-TEST-CONFLICT A5-2 (HD-E6) — a best-effort LOINC lookup,
+            which tests/integration/test_hl7v2_vendor_edge_cases.py locks in.
 
         ISO 14971 HAZARD-PROTO-001: Unmapped codes return None (OBX skipped)
         rather than raising — prevents one unknown code crashing the message.
@@ -499,19 +630,23 @@ class HL7v2Adapter:
         identifier = parts[0].strip()
         coding_system = parts[2].strip().upper() if len(parts) > 2 else ""
 
-        # 1. LOINC lookup
-        if coding_system in {"LN", "LOINC", ""} and identifier in _LOINC_TO_TYPE:
+        is_loinc = coding_system in {"LN", "LOINC"}
+        if (is_loinc or not coding_system) and identifier in _LOINC_TO_TYPE:
+            return _LOINC_TO_TYPE[identifier]
+        if not is_loinc and identifier.upper() in _VENDOR_TO_TYPE:
+            return _VENDOR_TO_TYPE[identifier.upper()]
+        if not is_loinc and identifier in _LOINC_TO_TYPE:  # interim, A5-2
             return _LOINC_TO_TYPE[identifier]
 
-        # 2. Vendor proprietary code (non-LOINC)
-        normalized = identifier.upper().replace("-", "-")
-        if normalized in _VENDOR_TO_TYPE:
-            return _VENDOR_TO_TYPE[normalized]
-
-        # 3. Best-effort LOINC without coding system assertion
-        if identifier in _LOINC_TO_TYPE:
-            return _LOINC_TO_TYPE[identifier]
-
+        if findings is not None:
+            findings.append(
+                Finding(
+                    ReasonCode.UNRECOGNISED_CODE,
+                    None,
+                    f"OBX-3 code '{identifier}' (system '{coding_system or 'none'}') "
+                    "is not mapped; segment skipped.",
+                )
+            )
         warnings.append(
             f"[OBX-UNKNOWN] Cannot map OBX-3 '{obx_3}' to a VitalSignType "
             f"(vendor={vendor.value}). Segment skipped. "
@@ -530,24 +665,7 @@ class HL7v2Adapter:
         Falls back to _DEFAULT_UNIT when OBX-6 is absent or unrecognised.
         """
         u = unit_str.split("^")[0].strip().lower()
-        unit_map: dict[str, VitalSignUnit] = {
-            "/min": VitalSignUnit.BPM,
-            "bpm": VitalSignUnit.BPM,
-            "beats/min": VitalSignUnit.BPM,
-            "breaths/min": VitalSignUnit.BREATHS_PER_MIN,
-            "rpm": VitalSignUnit.BREATHS_PER_MIN,
-            "%": VitalSignUnit.PERCENT,
-            "percent": VitalSignUnit.PERCENT,
-            "mmhg": VitalSignUnit.MMHG,
-            "mm[hg]": VitalSignUnit.MMHG,
-            "cel": VitalSignUnit.CELSIUS,
-            "degc": VitalSignUnit.CELSIUS,
-            "celsius": VitalSignUnit.CELSIUS,
-            "[degf]": VitalSignUnit.FAHRENHEIT,
-            "degf": VitalSignUnit.FAHRENHEIT,
-            "f": VitalSignUnit.FAHRENHEIT,
-        }
-        return unit_map.get(u, _DEFAULT_UNIT.get(vital_type, VitalSignUnit.PERCENT))
+        return _UNIT_MAP.get(u, _DEFAULT_UNIT.get(vital_type, VitalSignUnit.PERCENT))
 
     def _build_waveform_sample(
         self,
@@ -627,6 +745,12 @@ class HL7v2Adapter:
                 array_text = array_text.replace(",", "^")
 
         samples = _parse_numeric_array(array_text) if array_text is not None else None
+        if samples and len(samples) > self._max_waveform_samples:
+            warnings.append(
+                f"[OBX-WAVEFORM-TOO-LONG] {len(samples)} samples exceed the "
+                f"{self._max_waveform_samples}-sample limit (F-02). Segment skipped."
+            )
+            return None
         if not samples:
             warnings.append(
                 f"[OBX-WAVEFORM-UNPARSEABLE] Could not parse {value_type} "
@@ -712,15 +836,33 @@ class HL7v2Adapter:
         timestamp: datetime,
         device_id: str,
         warnings: list[str],
+        findings: list[Finding] | None = None,
     ) -> VitalSignSample | None:
-        """Parse AVPU string (ST type OBX) into VitalSignSample with avpu_level."""
-        key = raw_value.strip().upper()
-        avpu = _AVPU_STRINGS.get(key)
+        """
+        Parse an AVPU value into VitalSignSample with avpu_level.
+
+        Accepts a plain ST value ("V", "Voice") or a CWE-coded value
+        ("V^Voice^L"): the identifier component is tried first, then the text
+        component. An unmapped value (e.g. "Drowsy") is skipped AND reported as
+        UNMAPPED_AVPU — it is never assumed Alert (A1).
+        """
+        components = [c.strip().upper() for c in raw_value.split("^")]
+        avpu = next(
+            (_AVPU_STRINGS[c] for c in components[:2] if c in _AVPU_STRINGS), None
+        )
         if avpu is None:
             warnings.append(
                 f"[OBX-AVPU] Cannot map OBX-5 value '{raw_value}' to AVPULevel. "
                 f"Recognised values: {sorted(_AVPU_STRINGS.keys())}. Segment skipped."
             )
+            if findings is not None:
+                findings.append(
+                    Finding(
+                        ReasonCode.UNMAPPED_AVPU,
+                        VitalSignType.CONSCIOUSNESS,
+                        "Consciousness value could not be mapped to ACVPU.",
+                    )
+                )
             return None
         return VitalSignSample(
             vital_sign_type=VitalSignType.CONSCIOUSNESS,
@@ -737,14 +879,59 @@ class HL7v2Adapter:
         timestamp: datetime,
         device_id: str,
         warnings: list[str],
+        unit_str: str = "",
+        findings: list[Finding] | None = None,
     ) -> VitalSignSample | None:
         """
         Parse supplemental O2 OBX into VitalSignSample (boolean encoding).
 
         Encoding: 1.0 = on supplemental oxygen, 0.0 = on room air.
-        Handles: "1"/"0", "YES"/"NO", "O2"/"AIR", FiO2 % values > 21%.
+        Handles (A1):
+          - "1"/"0", "YES"/"NO", "O2"/"AIR" (boolean text);
+          - flow with an L/min unit: any flow > 0 is supplemental O2;
+          - FiO2 as a percentage (unit "%" or value >= 21): > 21 % is O2;
+          - FiO2 as a fraction (0 < value <= 1 with a decimal point): > 0.21 is O2.
+        A unitless number between 1 and 21 could be a flow or a percentage and
+        is rejected as AMBIGUOUS_UNIT — never read as room air.
         """
         v = raw_value.strip().upper()
+        unit = unit_str.split("^")[0].strip().lower()
+
+        def _o2(on_o2: bool) -> VitalSignSample:
+            return VitalSignSample(
+                vital_sign_type=VitalSignType.SUPPLEMENTAL_O2,
+                value=1.0 if on_o2 else 0.0,
+                unit=VitalSignUnit.BOOLEAN,
+                timestamp=timestamp,
+                device_id=device_id,
+            )
+
+        def _ambiguous(reason: str) -> None:
+            warnings.append(f"[OBX-O2] {reason} Value '{raw_value}' skipped.")
+            if findings is not None:
+                findings.append(
+                    Finding(
+                        ReasonCode.AMBIGUOUS_UNIT,
+                        VitalSignType.SUPPLEMENTAL_O2,
+                        reason,
+                    )
+                )
+
+        if unit in {"l/min", "lpm", "l/mn"}:
+            flow = _parse_numeric(v)
+            if flow is None:
+                _ambiguous("Oxygen flow is not a number.")
+                return None
+            return _o2(flow > 0.0)
+        if unit == "%":
+            pct = _parse_numeric(v)
+            if pct is None:
+                _ambiguous("FiO2 percentage is not a number.")
+                return None
+            return _o2(pct > 21.0)
+        if unit not in {"", "bool", "{ratio}", "1"}:
+            _ambiguous(f"Unrecognised oxygen unit '{unit}'.")
+            return None
 
         # Boolean / string representations
         if v in {"1", "YES", "TRUE", "O2", "OXYGEN", "ON O2"}:
@@ -764,17 +951,16 @@ class HL7v2Adapter:
                 device_id=device_id,
             )
 
-        # FiO2 percentage: > 21% = on supplemental O2
         numeric = _parse_numeric(v)
         if numeric is not None:
-            on_o2 = numeric > 21.0  # Room air FiO2 = 21%
-            return VitalSignSample(
-                vital_sign_type=VitalSignType.SUPPLEMENTAL_O2,
-                value=1.0 if on_o2 else 0.0,
-                unit=VitalSignUnit.BOOLEAN,
-                timestamp=timestamp,
-                device_id=device_id,
+            if "." in v and 0.0 < numeric <= 1.0:
+                return _o2(numeric > 0.21)  # FiO2 fraction; room air = 0.21
+            if numeric >= 21.0:
+                return _o2(numeric > 21.0)  # FiO2 percent; room air = 21 %
+            _ambiguous(
+                "Unitless oxygen value could be a flow (L/min) or a percentage."
             )
+            return None
 
         warnings.append(
             f"[OBX-O2] Cannot parse supplemental O2 value '{raw_value}'. Skipped."
@@ -855,6 +1041,182 @@ def _parse_hl7_datetime(hl7_ts: str) -> datetime:
                 continue
 
     return datetime.now(tz=timezone.utc)
+
+
+def _non_exact_reason(raw: str) -> str | None:
+    """
+    A4: an SN comparator ("<50", ">^100") or a compound value ("120/80",
+    SN range/ratio) is not an exact measurement and must not be scored as one.
+    """
+    s = raw.strip()
+    components = [c.strip() for c in s.split("^")]
+    if re.match(r"^(<=|>=|<>|<|>)", s) or components[0] in _COMPARATORS:
+        return f"Value '{raw}' carries a comparator; not an exact measurement."
+    if len(components) >= 3 and components[2] in {"-", "+", "/", ".", ":"} and components[3:4] != [""]:
+        return f"Value '{raw}' is a structured range/ratio, not a single value."
+    if re.fullmatch(r"-?\d+(\.\d+)?\s*[/:]\s*\d+(\.\d+)?", s):
+        return f"Value '{raw}' is a compound value (e.g. systolic/diastolic)."
+    return None
+
+
+_ESCAPES: Final[dict[str, str]] = {"F": "|", "S": "^", "T": "&", "R": "~", "E": "\\"}
+
+
+def _decode_escapes(value: str) -> str:
+    """A7: decode HL7 escape sequences \\F\\ \\S\\ \\T\\ \\R\\ \\E\\ (standard delimiters)."""
+    return re.sub(r"\\([FSTRE])\\", lambda m: _ESCAPES[m.group(1)], value)
+
+
+def _extract_patient_id_raw(
+    segments: list[str], warnings: list[str], findings: list[Finding]
+) -> str:
+    """
+    A7: read every PID-3 repetition (CX: ID^check^scheme^authority^type).
+    One non-empty repetition ⇒ its ID. Several ⇒ the single MR-typed one;
+    otherwise AMBIGUOUS_PATIENT_ID. None ⇒ "UNKNOWN" + AMBIGUOUS_PATIENT_ID
+    (which forces INCOMPLETE, so distinct patients are never scored together).
+    """
+    pid = next((s for s in segments if s.startswith("PID|")), None)
+    fields = pid.split("|") if pid else []
+    reps = [r for r in (fields[3] if len(fields) > 3 else "").split("~") if r.strip("^ ")]
+    parsed = [
+        (_decode_escapes(c[0].strip()), c[4].strip().upper() if len(c) > 4 else "")
+        for c in (r.split("^") for r in reps)
+    ]
+    parsed = [(i, t) for i, t in parsed if i]
+    if not parsed:
+        warnings.append("[PID-MISSING] PID-3 Patient Identifier absent — using 'UNKNOWN'.")
+        findings.append(
+            Finding(ReasonCode.AMBIGUOUS_PATIENT_ID, None, "PID-3 patient identifier absent.")
+        )
+        return "UNKNOWN"
+    if len(parsed) == 1:
+        return _checked_id(parsed[0][0], findings)
+    mrs = [i for i, t in parsed if t == "MR"]
+    if len(mrs) == 1:
+        return _checked_id(mrs[0], findings)
+    warnings.append(
+        f"[PID-AMBIGUOUS] {len(parsed)} PID-3 identifiers and no single MR-typed one."
+    )
+    findings.append(
+        Finding(
+            ReasonCode.AMBIGUOUS_PATIENT_ID,
+            None,
+            "Several PID-3 identifiers without a single MR-typed identifier.",
+        )
+    )
+    return parsed[0][0]
+
+
+def _checked_id(patient_id: str, findings: list[Finding]) -> str:
+    """F-04: an identifier outside [A-Za-z0-9._-]{1,64} cannot be scored or routed."""
+    if not is_safe_patient_id(patient_id):
+        findings.append(
+            Finding(
+                ReasonCode.AMBIGUOUS_PATIENT_ID,
+                None,
+                "Patient identifier contains characters outside [A-Za-z0-9._-] "
+                "or exceeds 64 characters.",
+            )
+        )
+    return patient_id
+
+
+def _apply_corrections(samples: list[VitalSignSample]) -> list[VitalSignSample]:
+    """
+    A3: within one message, a Corrected (C) value replaces any earlier F/P
+    value of the same vital sign type observed at or before the same time.
+    """
+    corrected = [s for s in samples if s.result_status == "C"]
+    if not corrected:
+        return samples
+    return [
+        s
+        for s in samples
+        if s.result_status == "C"
+        or not any(
+            c.vital_sign_type is s.vital_sign_type and s.timestamp <= c.timestamp
+            for c in corrected
+        )
+    ]
+
+
+def _parse_hl7_datetime_strict(hl7_ts: str) -> datetime | None:
+    """
+    Parse an HL7 DTM string; return None (not now()) when it cannot be parsed.
+
+    A2 / N-03. The lenient _parse_hl7_datetime above is kept unchanged for
+    existing callers/tests, but the adapter no longer uses it.
+    """
+    ts = hl7_ts.strip()
+    m = re.fullmatch(r"(\d{4}(?:\d{2}){0,5})(?:\.\d+)?([+-]\d{4})?", ts)
+    if not m:
+        return None
+    try:
+        parsed = _parse_hl7_datetime(ts)
+    except ValueError:
+        return None
+    # _parse_hl7_datetime's own fallback is now(); a well-formed DTM of a
+    # recognised length never takes that path, but guard anyway.
+    digits = m.group(1)
+    if len(digits) not in (4, 6, 8, 10, 12, 14):
+        return None
+    if parsed.year != int(digits[:4]):
+        return None
+    return parsed
+
+
+def _resolve_obs_timestamp(
+    obx: object,
+    msg_timestamp: datetime | None,
+    vital_type: VitalSignType,
+    warnings: list[str],
+    findings: list[Finding] | None,
+) -> datetime | None:
+    """
+    OBX-14 if present and parseable, else MSH-7; None (+ finding) otherwise.
+
+    INTERIM (BLOCKED-TEST-CONFLICT, HD-E6 entry A2-1): when BOTH OBX-14 and
+    MSH-7 are absent, the sample is kept with the receipt time as a
+    placeholder so the existing test
+    test_hl7v2_vendor_edge_cases.py::...::test_msh_with_only_the_required_leading_fields_does_not_crash
+    stays green. The UNPARSEABLE_TIMESTAMP finding is still recorded, which
+    forces INCOMPLETE: no NEWS2 score is ever computed from that placeholder.
+    A present-but-unparseable OBX-14 is always skipped (never now()).
+    """
+    obs_ts_str = _safe_field(obx, "obx_14").strip()
+    ts = _parse_hl7_datetime_strict(obs_ts_str) if obs_ts_str else msg_timestamp
+    if ts is None and not obs_ts_str and msg_timestamp is None:
+        warnings.append(
+            f"[OBX-TIME] No observation time for {vital_type.name} (OBX-14 and "
+            "MSH-7 absent). Receipt time used as a PLACEHOLDER only; the "
+            "sample cannot contribute to a score."
+        )
+        if findings is not None:
+            findings.append(
+                Finding(
+                    ReasonCode.UNPARSEABLE_TIMESTAMP,
+                    vital_type,
+                    "Observation time absent; receipt time is a placeholder, "
+                    "not an observation time. No score.",
+                )
+            )
+        return datetime.now(tz=timezone.utc)
+    if ts is None:
+        warnings.append(
+            f"[OBX-TIME] No usable observation time for {vital_type.name} "
+            "(OBX-14 and MSH-7 absent or unparseable). Segment skipped; "
+            "time is never assumed to be now."
+        )
+        if findings is not None:
+            findings.append(
+                Finding(
+                    ReasonCode.UNPARSEABLE_TIMESTAMP,
+                    vital_type,
+                    "Observation time absent or unparseable; not assumed current.",
+                )
+            )
+    return ts
 
 
 def _parse_numeric(raw: str) -> float | None:

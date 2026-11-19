@@ -1,11 +1,14 @@
 # =============================================================================
 # ICU Edge-to-FHIR Interoperability Gateway
 # Multi-stage Dockerfile — Edge-Optimized, developed following IEC 62304 Class B practices
-# Target: Alpine 3.19 · Non-root · CI limit 400 MB
+# Target: Alpine 3.23 · Non-root · CI limit 400 MB
 # =============================================================================
 
 # ─── Stage 1: Dependency Builder ─────────────────────────────────────────────
-FROM python:3.11-alpine3.19 AS builder
+# S-01: Alpine 3.19 reached end of life; 3.23 is supported. Pinned by digest
+# (multi-arch index) so a rebuild cannot silently change the base. Bump both
+# FROM lines together and re-run the docker-verify workflow.
+FROM python:3.11-alpine3.23@sha256:3e6740f02c2a48bfcf675c39ae0f456153667d9d87c1e5bb2e13ff848dba307f AS builder
 
 LABEL stage="builder"
 
@@ -37,16 +40,21 @@ WORKDIR /build
 
 # Install all production packages to an isolated prefix directory.
 # This prefix is copied to the runtime stage — no build tools follow.
-COPY requirements.txt .
+# S-02: install from the hashed lockfile (every transitive package pinned and
+# hash-checked). Regenerate after any requirements.txt change with:
+#   uv pip compile requirements.txt --generate-hashes --universal \
+#     --python-version 3.11 --no-header -o requirements.lock
+COPY requirements.lock .
 RUN pip install \
         --no-cache-dir \
         --no-warn-script-location \
+        --require-hashes \
         --prefix=/install \
-        -r requirements.txt
+        -r requirements.lock
 
 
 # ─── Stage 2: Runtime Image ───────────────────────────────────────────────────
-FROM python:3.11-alpine3.19 AS runtime
+FROM python:3.11-alpine3.23@sha256:3e6740f02c2a48bfcf675c39ae0f456153667d9d87c1e5bb2e13ff848dba307f AS runtime
 
 # OCI image annotations (IEC 62304 §8.1.2 SOUP traceability)
 # NOTE: samd.* labels above are the existing regulatory label surface and
@@ -67,9 +75,15 @@ LABEL org.opencontainers.image.title="ICU Edge-to-FHIR Interoperability Gateway"
 # Minimal runtime system libraries
 # libstdc++: required by scipy/numpy shared objects compiled with g++
 # openblas: BLAS backend — shared library used by scipy at runtime
-RUN apk add --no-cache \
+# S-06: `apk upgrade` pulls Alpine security fixes released after the pinned
+# base digest (Trivy fails the build on fixable HIGH/CRITICAL). setuptools and
+# wheel are build tools the runtime never imports; removing them drops the
+# vulnerable copies vendored inside setuptools (e.g. jaraco.context, wheel).
+RUN apk upgrade --no-cache \
+ && apk add --no-cache \
         libstdc++ \
-        openblas
+        openblas \
+ && python -m pip uninstall -y setuptools wheel
 
 # Non-root user (IEC 62304 security requirement — least-privilege principle)
 # Clinical edge servers must not run application processes as root.

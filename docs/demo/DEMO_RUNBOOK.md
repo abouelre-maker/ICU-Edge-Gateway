@@ -233,8 +233,8 @@ by running with the machine's network in use only for localhost.
 - **The dashboard is not part of the medical device.** It lives outside `src/`
   precisely so the container build cannot pick it up, and CI asserts its
   absence from the image.
-- **No authentication anywhere.** No authn, no authz, `allow_origins=["*"]`.
-  Fine on a laptop; not a deployment posture.
+- **API key only.** `run_demo.*` generates a random key per run; no user
+  accounts, no roles. CORS is an explicit allow-list. Not a deployment posture.
 - **No TLS on MLLP.** Plaintext TCP.
 - **Per-patient SpO2 scale is not implemented.** MLLP applies one process-wide
   scale. Per-patient scale selection is listed under future work in the README.

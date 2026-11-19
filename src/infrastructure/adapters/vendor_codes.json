@@ -1,0 +1,222 @@
+{
+  "_comment": "V-01: proprietary OBX-3 identifiers -> VitalSignType. Every entry is INFERRED, not taken from a vendor specification or observed traffic. provenance: vendor-spec | observed-traffic | inferred-UNVERIFIED. Change an entry's provenance only with a source_ref to the evidence. Loaded strictly by infrastructure/adapters/vendor_codes.py. A5 (2026-09): SO2/SAO2/STO2 and ABP-*/ART-* removed; T1/T2 kept only because tests lock them in (BLOCKED-TEST-CONFLICT A5-1, HD-E6) although they are site-unspecified.",
+  "codes": [
+    {
+      "code": "HR",
+      "system": "proprietary",
+      "maps_to": "HEART_RATE",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "PULSE",
+      "system": "proprietary",
+      "maps_to": "HEART_RATE",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "HEART RATE",
+      "system": "proprietary",
+      "maps_to": "HEART_RATE",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "PR",
+      "system": "proprietary",
+      "maps_to": "HEART_RATE",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "SPO2",
+      "system": "proprietary",
+      "maps_to": "SPO2",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "SPO2-%",
+      "system": "proprietary",
+      "maps_to": "SPO2",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "RESP",
+      "system": "proprietary",
+      "maps_to": "RESPIRATORY_RATE",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "RR",
+      "system": "proprietary",
+      "maps_to": "RESPIRATORY_RATE",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "RESPRATE",
+      "system": "proprietary",
+      "maps_to": "RESPIRATORY_RATE",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "NIBP-S",
+      "system": "proprietary",
+      "maps_to": "SYSTOLIC_BP",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "NIBP_S",
+      "system": "proprietary",
+      "maps_to": "SYSTOLIC_BP",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "NBP-S",
+      "system": "proprietary",
+      "maps_to": "SYSTOLIC_BP",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "NBP_S",
+      "system": "proprietary",
+      "maps_to": "SYSTOLIC_BP",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "SBP",
+      "system": "proprietary",
+      "maps_to": "SYSTOLIC_BP",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "NIBP-D",
+      "system": "proprietary",
+      "maps_to": "DIASTOLIC_BP",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "NIBP_D",
+      "system": "proprietary",
+      "maps_to": "DIASTOLIC_BP",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "NBP-D",
+      "system": "proprietary",
+      "maps_to": "DIASTOLIC_BP",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "NBP_D",
+      "system": "proprietary",
+      "maps_to": "DIASTOLIC_BP",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "DBP",
+      "system": "proprietary",
+      "maps_to": "DIASTOLIC_BP",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "TEMP",
+      "system": "proprietary",
+      "maps_to": "TEMPERATURE_CELSIUS",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "T1",
+      "system": "proprietary",
+      "maps_to": "TEMPERATURE_CELSIUS",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "T2",
+      "system": "proprietary",
+      "maps_to": "TEMPERATURE_CELSIUS",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "TEMPBLA",
+      "system": "proprietary",
+      "maps_to": "TEMPERATURE_CELSIUS",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "TEMPCORE",
+      "system": "proprietary",
+      "maps_to": "TEMPERATURE_CELSIUS",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "AVPU",
+      "system": "proprietary",
+      "maps_to": "CONSCIOUSNESS",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "LOC",
+      "system": "proprietary",
+      "maps_to": "CONSCIOUSNESS",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "CONS",
+      "system": "proprietary",
+      "maps_to": "CONSCIOUSNESS",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "FIO2",
+      "system": "proprietary",
+      "maps_to": "SUPPLEMENTAL_O2",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "O2FLOW",
+      "system": "proprietary",
+      "maps_to": "SUPPLEMENTAL_O2",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "O2DELIVERY",
+      "system": "proprietary",
+      "maps_to": "SUPPLEMENTAL_O2",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    },
+    {
+      "code": "AIROROXYGEN",
+      "system": "proprietary",
+      "maps_to": "SUPPLEMENTAL_O2",
+      "provenance": "inferred-UNVERIFIED",
+      "source_ref": "TODO-VERIFY"
+    }
+  ]
+}

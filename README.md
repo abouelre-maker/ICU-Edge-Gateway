@@ -133,6 +133,11 @@ IEC 62304 §5.3 (software architectural design) in comments throughout the codeb
 | `GET` | `/docs` | OpenAPI (Swagger) interactive documentation |
 | `GET` | `/openapi.json` | OpenAPI schema |
 
+`/api/v1/ingest`, `/api/v1/vitals` and the live WebSocket require an API key
+(`Authorization: Bearer <key>`; the WebSocket also accepts `?access_token=<key>`). Keys come from
+`GATEWAY_API_KEYS` (comma-separated, each at least 32 characters). The gateway refuses to start
+without them; it never falls back to open access. `/health` stays open for probes.
+
 Every clinical response carries an `X-CDS-Advisory-Only: true` header and a matching FHIR
 extension — this software never initiates automated treatment.
 
@@ -152,6 +157,7 @@ Run the server locally:
 
 ```bash
 export CORS_ALLOWED_ORIGINS="http://localhost:3000"   # required in production; see below
+export GATEWAY_API_KEYS="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 python -m uvicorn main:app --app-dir src --host 0.0.0.0 --port 8000
 ```
 
@@ -162,7 +168,7 @@ a liveness check.
 unset, the gateway falls back to a `http://localhost:3000` dev default; if set to `*`, the
 gateway refuses to start ([src/config.py](src/config.py) — HAZARD-CORS-001 mitigation).
 
-For containerized deployment, see the multi-stage `Dockerfile` (Alpine 3.19, non-root,
+For containerized deployment, see the multi-stage `Dockerfile` (Alpine 3.23 pinned by digest, non-root,
 CI fails the build if the image exceeds 400 MB) and [docs/DEPLOYMENT_RUNBOOK.md](docs/DEPLOYMENT_RUNBOOK.md) for the
 full step-by-step procedure.
 
@@ -215,7 +221,7 @@ installed (`pip install -r requirements-dev.txt`).
 5. **Shows the resulting FHIR R4 Bundle** — the same standards-based output
    ([`bundle_assembler.py`](src/infrastructure/fhir/bundle_assembler.py)) any downstream
    EHR or CDS system would receive, including the rejected-artifact note as a
-   `Bundle.note` / `OperationOutcome` audit entry rather than a silently dropped value.
+   `OperationOutcome` audit entry rather than a silently dropped value.
    *Why it matters:* this is not a demo-only summary — it is the literal interoperable
    output this gateway produces for every real ingestion, HL7-in-FHIR-out.
 6. **Shows the live delta arriving on the WebSocket dashboard channel**
@@ -331,7 +337,8 @@ Dockerfile                 Multi-stage, Alpine, non-root, IEC 62304-annotated
   (HAZARD-PROTO-002).
 - The MLLP streaming path applies one process-wide SpO₂ scale; per-patient scale selection
   is future work.
-- The demonstration stack has no authentication and no TLS on MLLP; it is for local use only.
+- The gateway requires an API key (`GATEWAY_API_KEYS`); there is no TLS in the process, so
+  terminate TLS at a reverse proxy. The demonstration stack is for local use only.
 - The Docker image (≈372 MB) exceeds the project's own 150 MB edge budget
   ([GAP-DOCKER-SIZE-001](regulatory/findings/GAP-DOCKER-SIZE-001.md)).
 - Two DSP residual risks (HAZARD-DSP-005, HAZARD-DSP-006) await review by a credentialed

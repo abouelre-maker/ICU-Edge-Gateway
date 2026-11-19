@@ -48,10 +48,10 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       # ── Build ────────────────────────────────────────────────────────────
       # continue-on-error so a musllinux wheel failure is REPORTED with its
@@ -148,7 +148,22 @@ jobs:
 
       - name: Start the container
         run: |
-          docker run -d --name icu-verify -p 8000:8000 "$IMAGE"
+          # F-01: the gateway refuses to start without an API key. A random
+          # per-run key is masked in the log and shared with later steps.
+          key="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          echo "::add-mask::$key"
+          echo "GATEWAY_API_KEY=$key" >> "$GITHUB_ENV"
+          # A2: the gateway also refuses to start until every NEWS2 staleness
+          # window is set. Those are CLINICAL values still open (HD-E7). This
+          # job checks wiring on synthetic data only, so it uses the same
+          # TEST-HARNESS value as tests/conftest.py (ten years), not a
+          # clinical value.
+          stale=""
+          for t in RESPIRATORY_RATE SPO2 SUPPLEMENTAL_O2 SYSTOLIC_BP HEART_RATE CONSCIOUSNESS TEMPERATURE_CELSIUS; do
+            stale="$stale -e NEWS2_STALENESS_WINDOW_${t}_SECONDS=315360000"
+          done
+          # shellcheck disable=SC2086
+          docker run -d --name icu-verify -p 8000:8000 -e GATEWAY_API_KEYS="$key" $stale "$IMAGE"
           echo "Waiting for the gateway to accept connections..."
           for i in $(seq 1 60); do
             if curl -fsS --max-time 2 http://127.0.0.1:8000/health >/dev/null 2>&1; then
@@ -199,8 +214,16 @@ jobs:
           printf 'OBX|6|NM|57834-7^Oxygen therapy^LN||0||||||F|||20260101120000\r'                          >> /tmp/msg.hl7
           printf 'OBX|7|ST|76270-8^AVPU score^LN||A||||||F|||20260101120000\r'                              >> /tmp/msg.hl7
 
+          # F-01: without credentials the request must be refused.
+          anon="$(curl -s -o /dev/null -w '%{http_code}' \
+            -X POST 'http://127.0.0.1:8000/api/v1/ingest?spo2_scale=SCALE_1' \
+            -H 'Content-Type: text/plain' --data-binary @/tmp/msg.hl7)"
+          echo "  unauthenticated HTTP $anon"
+          [ "$anon" = "401" ] || { echo "::error::unauthenticated ingest returned $anon, expected 401"; exit 1; }
+
           code="$(curl -s -D /tmp/h.txt -o /tmp/bundle.json -w '%{http_code}' \
             -X POST 'http://127.0.0.1:8000/api/v1/ingest?spo2_scale=SCALE_1' \
+            -H "Authorization: Bearer $GATEWAY_API_KEY" \
             -H 'Content-Type: text/plain' --data-binary @/tmp/msg.hl7)"
           echo "  HTTP $code"
           [ "$code" = "200" ] || { echo "::error::ingest returned $code"; cat /tmp/bundle.json; exit 1; }

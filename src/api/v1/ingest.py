@@ -18,23 +18,29 @@ The X-CDS-Advisory-Only response header signals this to downstream consumers.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated
 
 import structlog
+from config import get_hl7_max_obx, get_max_waveform_samples
 from domain.entities.device_context import DeviceContext, HL7Version, MonitorVendor
 from domain.entities.patient_context import PatientContext, SpO2Scale
-from domain.services.vitals_orchestrator import VitalsOrchestrator
+from domain.services.vitals_orchestrator import VitalsAnalysisResult, VitalsOrchestrator
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
-from infrastructure.adapters.hl7v2_adapter import HL7v2Adapter
+from infrastructure.adapters.hl7v2_adapter import HL7ParseResult, HL7v2Adapter
 from infrastructure.fhir.bundle_assembler import BundleAssembler
+
+from api.v1.outcome_headers import outcome_headers
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["HL7 Ingestion"])
 
 # Shared stateless service instances (safe for concurrent use)
-_adapter = HL7v2Adapter()
+_adapter = HL7v2Adapter(
+    max_obx=get_hl7_max_obx(), max_waveform_samples=get_max_waveform_samples()
+)
 _orchestrator = VitalsOrchestrator()
 _assembler = BundleAssembler()
 
@@ -157,40 +163,18 @@ async def ingest_hl7(
             model=device_model or "Unknown",
         )
 
-    parse_result = _adapter.parse(raw_hl7, device_context=device_context_hint)
-
-    # ── Stage 2: Build PatientContext & DeviceContext ──────────────────────────
-    patient_context = PatientContext(
-        patient_id=parse_result.patient_id,
-        spo2_scale=spo2_scale,
-        encounter_id=encounter_id,
-    )
-
-    # Build final DeviceContext from parsed result or provided override
-    device_context: DeviceContext | None = device_context_hint
-    if (
-        device_context is None
-        and parse_result.detected_vendor is not MonitorVendor.GENERIC
-    ):
-        device_context = DeviceContext(
-            device_id=device_id or f"DEVICE-{parse_result.detected_vendor.value}",
-            vendor=parse_result.detected_vendor,
-            model=device_model or "ICU Monitor",
-            hl7_version=HL7Version.V2_5_1,
+    # F-02: all CPU-bound work (hl7apy parse, DSP, NEWS2, FHIR assembly) runs
+    # in a worker thread so one large message cannot stall the event loop.
+    parse_result, patient_context, device_context, analysis_result, bundle = (
+        await asyncio.to_thread(
+            _run_pipeline,
+            raw_hl7,
+            device_context_hint,
+            spo2_scale,
+            encounter_id,
+            device_id,
+            device_model,
         )
-
-    # ── Stage 3: Domain Pipeline (DSP + NEWS2) ─────────────────────────────────
-    analysis_result = _orchestrator.analyse(
-        samples=list(parse_result.samples),
-        context=patient_context,
-    )
-
-    # ── Stage 4: FHIR Bundle Assembly ─────────────────────────────────────────
-    bundle = _assembler.assemble(
-        result=analysis_result,
-        patient_context=patient_context,
-        device_context=device_context,
-        encounter_id=encounter_id,
     )
 
     log.info(
@@ -251,6 +235,7 @@ def _pipeline_headers(result: object) -> dict[str, str]:
         return {"X-CDS-Advisory-Only": "true"}
 
     headers: dict[str, str] = {
+        **outcome_headers(result),
         "X-CDS-Advisory-Only": "true",
         "X-Pipeline-Duration-Ms": str(round(result.processing_duration_ms, 2)),
         "X-Warning-Count": str(len(result.pipeline_warnings)),
@@ -260,3 +245,58 @@ def _pipeline_headers(result: object) -> dict[str, str]:
         headers["X-NEWS2-Risk-Level"] = result.news2_score.risk_level.value
 
     return headers
+
+
+def _run_pipeline(
+    raw_hl7: str,
+    device_context_hint: DeviceContext | None,
+    spo2_scale: SpO2Scale,
+    encounter_id: str | None,
+    device_id: str | None,
+    device_model: str | None,
+) -> tuple[
+    HL7ParseResult,
+    PatientContext,
+    DeviceContext | None,
+    VitalsAnalysisResult,
+    dict[str, object],
+]:
+    """Synchronous HL7 → DSP → NEWS2 → FHIR pipeline; runs in a worker thread (F-02)."""
+    parse_result = _adapter.parse(raw_hl7, device_context=device_context_hint)
+
+    # ── Stage 2: Build PatientContext & DeviceContext ──────────────────────────
+    patient_context = PatientContext(
+        patient_id=parse_result.patient_id,
+        spo2_scale=spo2_scale,
+        encounter_id=encounter_id,
+    )
+
+    # Build final DeviceContext from parsed result or provided override
+    device_context: DeviceContext | None = device_context_hint
+    if (
+        device_context is None
+        and parse_result.detected_vendor is not MonitorVendor.GENERIC
+    ):
+        device_context = DeviceContext(
+            device_id=device_id or f"DEVICE-{parse_result.detected_vendor.value}",
+            vendor=parse_result.detected_vendor,
+            model=device_model or "ICU Monitor",
+            hl7_version=HL7Version.V2_5_1,
+        )
+
+    # ── Stage 3: Domain Pipeline (DSP + NEWS2) ─────────────────────────────────
+    analysis_result = _orchestrator.analyse(
+        samples=list(parse_result.samples),
+        context=patient_context,
+        upstream_findings=parse_result.findings,
+    )
+
+    # ── Stage 4: FHIR Bundle Assembly ─────────────────────────────────────────
+    bundle = _assembler.assemble(
+        result=analysis_result,
+        patient_context=patient_context,
+        device_context=device_context,
+        encounter_id=encounter_id,
+    )
+
+    return parse_result, patient_context, device_context, analysis_result, bundle
