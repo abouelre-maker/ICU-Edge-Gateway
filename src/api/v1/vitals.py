@@ -18,12 +18,14 @@ from typing import Any
 import structlog
 from domain.entities.device_context import DeviceContext, MonitorVendor
 from domain.entities.patient_context import PatientContext, SpO2Scale
+from domain.entities.score_outcome import Finding, ReasonCode
 from domain.entities.vital_sign import (
     AVPULevel,
     VitalSignSample,
     VitalSignType,
     VitalSignUnit,
 )
+from domain.services.unit_normaliser import normalise
 from domain.services.vitals_orchestrator import VitalsOrchestrator
 from fastapi import APIRouter, Request, status
 from fastapi.responses import JSONResponse
@@ -236,12 +238,26 @@ async def ingest_vitals(
 
     # ── Convert Pydantic payloads → domain VitalSignSamples ──────────────────
     samples: list[VitalSignSample] = []
+    unit_findings: list[Finding] = []
     for item in payload.samples:
+        # A4: the unit field is honoured — converted (°F → °C) or, if it does
+        # not fit the vital sign type, the sample is excluded and reported.
+        normalised = normalise(item.vital_sign_type, item.value, item.unit)
+        if normalised is None:
+            unit_findings.append(
+                Finding(
+                    ReasonCode.AMBIGUOUS_UNIT,
+                    item.vital_sign_type,
+                    f"Unit '{item.unit.value}' is not valid for this observation type.",
+                )
+            )
+            continue
+        value, unit = normalised
         try:
             sample = VitalSignSample(
                 vital_sign_type=item.vital_sign_type,
-                value=item.value,
-                unit=item.unit,
+                value=value,
+                unit=unit,
                 timestamp=item.timestamp,
                 avpu_level=item.avpu_level,
                 waveform=tuple(item.waveform) if item.waveform else None,
@@ -276,6 +292,7 @@ async def ingest_vitals(
     analysis_result = _orchestrator.analyse(
         samples=samples,
         context=patient_context,
+        upstream_findings=unit_findings,
     )
 
     # ── FHIR Bundle Assembly ──────────────────────────────────────────────────

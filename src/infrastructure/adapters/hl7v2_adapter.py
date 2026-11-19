@@ -49,6 +49,7 @@ from domain.entities.vital_sign import (
     VitalSignType,
     VitalSignUnit,
 )
+from domain.services.unit_normaliser import KPA_TO_MMHG, normalise
 from hl7apy.parser import parse_message as _hl7apy_parse
 
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
@@ -162,6 +163,29 @@ _AVPU_STRINGS: Final[dict[str, AVPULevel]] = {
     "NEW_CONFUSION": AVPULevel.NEW_CONFUSION,
     "ACVPU-C": AVPULevel.NEW_CONFUSION,
 }
+
+# OBX-6 unit strings (lower-cased) → VitalSignUnit.
+_UNIT_MAP: Final[dict[str, VitalSignUnit]] = {
+    "/min": VitalSignUnit.BPM,
+    "bpm": VitalSignUnit.BPM,
+    "beats/min": VitalSignUnit.BPM,
+    "breaths/min": VitalSignUnit.BREATHS_PER_MIN,
+    "rpm": VitalSignUnit.BREATHS_PER_MIN,
+    "%": VitalSignUnit.PERCENT,
+    "percent": VitalSignUnit.PERCENT,
+    "mmhg": VitalSignUnit.MMHG,
+    "mm[hg]": VitalSignUnit.MMHG,
+    "cel": VitalSignUnit.CELSIUS,
+    "degc": VitalSignUnit.CELSIUS,
+    "celsius": VitalSignUnit.CELSIUS,
+    "[degf]": VitalSignUnit.FAHRENHEIT,
+    "degf": VitalSignUnit.FAHRENHEIT,
+    "f": VitalSignUnit.FAHRENHEIT,
+}
+
+# A4: "39,5" is a decimal comma, not 39.
+_DECIMAL_COMMA: Final = re.compile(r"-?\d+,\d+")
+_COMPARATORS: Final = frozenset({"<", ">", "<=", ">=", "<>"})
 
 # VitalSignType → default VitalSignUnit when OBX-6 is absent or unmapped.
 _DEFAULT_UNIT: Final[dict[VitalSignType, VitalSignUnit]] = {
@@ -504,12 +528,6 @@ class HL7v2Adapter:
             )
             return None
 
-        # OBX-6: Units
-        unit = self._resolve_unit(
-            unit_str=_safe_field(obx, "obx_6"),
-            vital_type=vital_type,
-        )
-
         # OBX-14: Date/Time of Observation (message timestamp as fallback).
         # A2 / N-03: absent or unparseable ⇒ UNPARSEABLE_TIMESTAMP, never now().
         obs_timestamp = _resolve_obs_timestamp(
@@ -534,14 +552,53 @@ class HL7v2Adapter:
                 findings=findings,
             )
 
-        # All other types: numeric value
-        numeric = _parse_numeric(raw_value)
+        # All other types: numeric value (A4 — never silently misread)
+        def _reject(code: ReasonCode, reason: str) -> None:
+            warnings.append(f"[OBX-SKIP] {vital_type.name}: {reason} Segment skipped.")
+            if findings is not None:
+                findings.append(Finding(code, vital_type, reason))
+
+        non_exact = _non_exact_reason(raw_value)
+        if non_exact is not None:
+            _reject(ReasonCode.NON_EXACT_VALUE, non_exact)
+            return None
+        text = raw_value.replace(",", ".") if _DECIMAL_COMMA.fullmatch(raw_value) else raw_value
+        numeric = _parse_numeric(text)
         if numeric is None:
             warnings.append(
                 f"[OBX-SKIP] Cannot parse OBX-5 '{raw_value}' as a number "
                 f"for {vital_type.name}. Segment skipped."
             )
             return None
+
+        # OBX-6: absent ⇒ documented per-type default; unrecognised ⇒ ambiguous.
+        unit_text = _safe_field(obx, "obx_6").split("^")[0].strip().lower()
+        if not unit_text:
+            unit = _DEFAULT_UNIT.get(vital_type, VitalSignUnit.PERCENT)
+        elif unit_text == "kpa" and vital_type in {
+            VitalSignType.SYSTOLIC_BP,
+            VitalSignType.DIASTOLIC_BP,
+        }:
+            numeric, unit = numeric * KPA_TO_MMHG, VitalSignUnit.MMHG
+            warnings.append(f"[OBX-UNIT] {vital_type.name} converted from kPa to mmHg.")
+        elif unit_text in _UNIT_MAP:
+            unit = _UNIT_MAP[unit_text]
+        else:
+            _reject(ReasonCode.AMBIGUOUS_UNIT, f"Unrecognised unit '{unit_text}'.")
+            return None
+        normalised = normalise(vital_type, numeric, unit)
+        if normalised is None:
+            _reject(
+                ReasonCode.AMBIGUOUS_UNIT,
+                f"Unit '{unit.value}' is not valid for this observation type.",
+            )
+            return None
+        if normalised[1] is not unit:
+            warnings.append(
+                f"[OBX-UNIT] {vital_type.name} converted from {unit.value} "
+                f"to {normalised[1].value}."
+            )
+        numeric, unit = normalised
 
         return VitalSignSample(
             vital_sign_type=vital_type,
@@ -603,24 +660,7 @@ class HL7v2Adapter:
         Falls back to _DEFAULT_UNIT when OBX-6 is absent or unrecognised.
         """
         u = unit_str.split("^")[0].strip().lower()
-        unit_map: dict[str, VitalSignUnit] = {
-            "/min": VitalSignUnit.BPM,
-            "bpm": VitalSignUnit.BPM,
-            "beats/min": VitalSignUnit.BPM,
-            "breaths/min": VitalSignUnit.BREATHS_PER_MIN,
-            "rpm": VitalSignUnit.BREATHS_PER_MIN,
-            "%": VitalSignUnit.PERCENT,
-            "percent": VitalSignUnit.PERCENT,
-            "mmhg": VitalSignUnit.MMHG,
-            "mm[hg]": VitalSignUnit.MMHG,
-            "cel": VitalSignUnit.CELSIUS,
-            "degc": VitalSignUnit.CELSIUS,
-            "celsius": VitalSignUnit.CELSIUS,
-            "[degf]": VitalSignUnit.FAHRENHEIT,
-            "degf": VitalSignUnit.FAHRENHEIT,
-            "f": VitalSignUnit.FAHRENHEIT,
-        }
-        return unit_map.get(u, _DEFAULT_UNIT.get(vital_type, VitalSignUnit.PERCENT))
+        return _UNIT_MAP.get(u, _DEFAULT_UNIT.get(vital_type, VitalSignUnit.PERCENT))
 
     def _build_waveform_sample(
         self,
@@ -990,6 +1030,22 @@ def _parse_hl7_datetime(hl7_ts: str) -> datetime:
                 continue
 
     return datetime.now(tz=timezone.utc)
+
+
+def _non_exact_reason(raw: str) -> str | None:
+    """
+    A4: an SN comparator ("<50", ">^100") or a compound value ("120/80",
+    SN range/ratio) is not an exact measurement and must not be scored as one.
+    """
+    s = raw.strip()
+    components = [c.strip() for c in s.split("^")]
+    if re.match(r"^(<=|>=|<>|<|>)", s) or components[0] in _COMPARATORS:
+        return f"Value '{raw}' carries a comparator; not an exact measurement."
+    if len(components) >= 3 and components[2] in {"-", "+", "/", ".", ":"} and components[3:4] != [""]:
+        return f"Value '{raw}' is a structured range/ratio, not a single value."
+    if re.fullmatch(r"-?\d+(\.\d+)?\s*[/:]\s*\d+(\.\d+)?", s):
+        return f"Value '{raw}' is a compound value (e.g. systolic/diastolic)."
+    return None
 
 
 def _apply_corrections(samples: list[VitalSignSample]) -> list[VitalSignSample]:
