@@ -10,8 +10,10 @@ Supported protocol variants:
   - NA (Numeric Array) and ED (Encapsulated Data) waveform: parsed into
     VitalSignSample.waveform for the DSP artifact-rejection pipeline. See
     _build_waveform_sample for the exact supported subset and known limits.
-  - Vendor dialects: Philips IntelliVue / GE CARESCAPE / Dräger Infinity /
-    Mindray Beneview / Nihon Kohden / Generic (LOINC fallback)
+  - OBX-3 identifiers: LOINC, plus a small table of proprietary codes whose
+    mappings are INFERRED, not taken from any vendor specification or observed
+    traffic (vendor_codes.json, provenance "inferred-UNVERIFIED"; V-01). No
+    specific monitor model or vendor interface is supported or verified.
 
 IEC 62304 §5.3: GoF Adapter pattern — isolates legacy protocol complexity
 from the pure domain model.
@@ -52,12 +54,15 @@ from domain.entities.vital_sign import (
 from domain.services.unit_normaliser import KPA_TO_MMHG, normalise
 from hl7apy.parser import parse_message as _hl7apy_parse
 
+from infrastructure.adapters.vendor_codes import load_vendor_codes
+
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
 # ── Code Mapping Tables ────────────────────────────────────────────────────────
 
 # LOINC observation identifiers → VitalSignType.
-# Source: LOINC.org — codes validated against NLM VSAC value sets.
+# LOINC codes (loinc.org). Mapping choices are this project's own; TODO-VERIFY
+# each against the published LOINC term before any external claim.
 _LOINC_TO_TYPE: Final[dict[str, VitalSignType]] = {
     "8867-4": VitalSignType.HEART_RATE,  # Heart rate
     "59408-5": VitalSignType.SPO2,  # SpO2 by pulse ox
@@ -72,57 +77,14 @@ _LOINC_TO_TYPE: Final[dict[str, VitalSignType]] = {
     "3151-8": VitalSignType.SUPPLEMENTAL_O2,  # Inhaled O2 flow rate
 }
 
-# Vendor-specific proprietary OBX-3 identifiers → VitalSignType.
-# Covers Philips IntelliVue (MX/MP series), GE CARESCAPE B/DASH,
-# Dräger Infinity, Mindray Beneview, and Nihon Kohden.
+# Proprietary OBX-3 identifiers → VitalSignType (V-01). Loaded from the data
+# file vendor_codes.json by a strict loader; every entry there carries a
+# provenance field and ALL are currently "inferred-UNVERIFIED" — none was
+# taken from a vendor interface specification or observed traffic.
+# A5 removals (SaO2 / tissue / arterial codes) and the blocked T1/T2 item
+# (HD-E6 A5-1) are recorded in that file's _comment and regulatory/findings/A5.md.
 # ISO 14971 HAZARD-PROTO-001: Unlisted codes → type=None → OBX skipped.
-_VENDOR_TO_TYPE: Final[dict[str, VitalSignType]] = {
-    # Heart Rate
-    "HR": VitalSignType.HEART_RATE,
-    "PULSE": VitalSignType.HEART_RATE,
-    "HEART RATE": VitalSignType.HEART_RATE,
-    "PR": VitalSignType.HEART_RATE,  # Pulse Rate (GE)
-    # SpO2
-    "SPO2": VitalSignType.SPO2,
-    # A5: SO2 / SAO2 (arterial) / STO2 (tissue) removed — not pulse oximetry.
-    "SPO2-%": VitalSignType.SPO2,
-    # Respiratory Rate
-    "RESP": VitalSignType.RESPIRATORY_RATE,
-    "RR": VitalSignType.RESPIRATORY_RATE,
-    "RESPRATE": VitalSignType.RESPIRATORY_RATE,
-    # Systolic BP (NIBP = Non-Invasive, ABP = Arterial)
-    "NIBP-S": VitalSignType.SYSTOLIC_BP,
-    "NIBP_S": VitalSignType.SYSTOLIC_BP,
-    "NBP-S": VitalSignType.SYSTOLIC_BP,
-    "NBP_S": VitalSignType.SYSTOLIC_BP,
-    "SBP": VitalSignType.SYSTOLIC_BP,
-    # A5: ABP-S / ART-S (arterial) removed — they collided with NIBP.
-    # Diastolic BP
-    "NIBP-D": VitalSignType.DIASTOLIC_BP,
-    "NIBP_D": VitalSignType.DIASTOLIC_BP,
-    "NBP-D": VitalSignType.DIASTOLIC_BP,
-    "NBP_D": VitalSignType.DIASTOLIC_BP,
-    "DBP": VitalSignType.DIASTOLIC_BP,
-    # A5: ABP-D / ART-D (arterial) removed — they collided with NIBP.
-    # Temperature
-    "TEMP": VitalSignType.TEMPERATURE_CELSIUS,
-    # A5 (BLOCKED-TEST-CONFLICT A5-1, HD-E6): T1 / T2 are site-unspecified and
-    # may be skin temperature, but tests/unit/test_demo_streamer.py locks in the
-    # demo's "T1^...^DRAEGER" mapping. Kept until Housam decides.
-    "T1": VitalSignType.TEMPERATURE_CELSIUS,
-    "T2": VitalSignType.TEMPERATURE_CELSIUS,
-    "TEMPBLA": VitalSignType.TEMPERATURE_CELSIUS,  # Bladder temp (Philips)
-    "TEMPCORE": VitalSignType.TEMPERATURE_CELSIUS,
-    # Consciousness (AVPU)
-    "AVPU": VitalSignType.CONSCIOUSNESS,
-    "LOC": VitalSignType.CONSCIOUSNESS,
-    "CONS": VitalSignType.CONSCIOUSNESS,
-    # Supplemental O2
-    "FIO2": VitalSignType.SUPPLEMENTAL_O2,  # FiO2 > 0.21 = on O2
-    "O2FLOW": VitalSignType.SUPPLEMENTAL_O2,
-    "O2DELIVERY": VitalSignType.SUPPLEMENTAL_O2,
-    "AIROROXYGEN": VitalSignType.SUPPLEMENTAL_O2,
-}
+_VENDOR_TO_TYPE: Final[dict[str, VitalSignType]] = load_vendor_codes()
 
 # MSH-3 Sending Application → MonitorVendor.
 # Case-insensitive substring match against upper-cased MSH-3 value.
