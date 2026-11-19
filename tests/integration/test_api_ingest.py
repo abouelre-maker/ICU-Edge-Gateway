@@ -28,6 +28,14 @@ FULL_ORU = (
     "OBX|6|NM|57834-7^Supplemental O2^LN||0||||||F|||20240115100000\r"
 )
 
+# A1 (2026-09): FULL_ORU carries no level-of-consciousness OBX, so NEWS2 is now
+# INCOMPLETE (MISSING_CONSCIOUSNESS) instead of silently assuming Alert. This
+# variant supplies ACVPU explicitly so the scoring path stays covered.
+FULL_ORU_WITH_ACVPU = (
+    FULL_ORU
+    + "OBX|7|ST|67775-7^Level of responsiveness^LN||A||||||F|||20240115100000\r"
+)
+
 # Philips IntelliVue with proprietary codes
 PHILIPS_ORU = (
     "MSH|^~\\&|PHILIPS|ICU-BED-7|EHR|HOSPITAL|20240115100000"
@@ -131,6 +139,29 @@ class TestIngestValidHL7:
                 for c in e["resource"].get("code", {}).get("coding", [])
             )
         ]
+        # Amended under the delegated A1 rule (2026-09): FULL_ORU has no ACVPU
+        # OBX, so no NEWS2 Observation may be produced (no assumed "Alert").
+        assert len(news2_entries) == 0
+        assert response.headers["x-score-outcome"] == "incomplete"
+        assert "MISSING_CONSCIOUSNESS" in response.headers["x-score-reasons"]
+
+    async def test_bundle_contains_news2_observation_when_all_seven_inputs_present(
+        self, client: AsyncClient
+    ) -> None:
+        """Companion to the amended test above: scoring path still covered."""
+        response = await client.post(
+            "/api/v1/ingest", content=FULL_ORU_WITH_ACVPU, headers=_HL7_HEADERS
+        )
+        entries = response.json()["entry"]
+        news2_entries = [
+            e
+            for e in entries
+            if e["resource"]["resourceType"] == "Observation"
+            and any(
+                c.get("code") == "1239842005"
+                for c in e["resource"].get("code", {}).get("coding", [])
+            )
+        ]
         assert len(news2_entries) == 1, (
             "Full vital signs set must produce exactly one NEWS2 Observation "
             "(SNOMED CT 1239842005). ISO 14971 HAZARD-NEWS2-001."
@@ -172,6 +203,20 @@ class TestIngestValidHL7:
     ) -> None:
         response = await client.post(
             "/api/v1/ingest", content=FULL_ORU, headers=_HL7_HEADERS
+        )
+        # Amended under the delegated A1 rule (2026-09): without ACVPU there is
+        # no score, so the score headers must be absent and the outcome explicit.
+        assert "x-news2-total" not in response.headers
+        assert "x-news2-risk-level" not in response.headers
+        assert response.headers["x-score-outcome"] == "incomplete"
+        assert "MISSING_CONSCIOUSNESS" in response.headers["x-score-reasons"]
+
+    async def test_news2_total_header_present_when_all_seven_inputs_present(
+        self, client: AsyncClient
+    ) -> None:
+        """Companion to the amended test above: scoring path still covered."""
+        response = await client.post(
+            "/api/v1/ingest", content=FULL_ORU_WITH_ACVPU, headers=_HL7_HEADERS
         )
         assert "x-news2-total" in response.headers
         assert "x-news2-risk-level" in response.headers
