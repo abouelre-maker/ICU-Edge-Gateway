@@ -284,6 +284,33 @@ checked to exist at compilation time — not asserted from memory.
   unreachable — the actual mitigation is downstream, in `PhysiologicalBoundsChecker`.
 - **Verification:** `tests/integration/test_api_vitals.py::TestVitalsValidationErrors`
 
+#### REQ-API-011
+- **Source:** `src/main.py` (`request_validation_handler`)
+- **Statement:** A request rejected by request-model validation SHALL be answered with HTTP 422
+  whose body names only the failing location, type and message; the submitted value SHALL NOT be
+  echoed back.
+- **Rationale / Hazard link:** HAZARD-SEC-002 (identifier disclosure).
+- **Verification:** `tests/integration/test_f12_f13_privacy.py`
+
+### 3.9 Security (added 2026-11-19)
+
+#### REQ-SEC-001
+- **Source:** `src/api/auth.py`, `src/main.py`, `src/config.py`
+- **Statement:** `POST /api/v1/ingest`, `POST /api/v1/vitals` and `WS /api/v1/live/vitals` SHALL
+  require a valid API key; the gateway SHALL refuse to start unless at least one key of at least
+  32 characters is configured. The MLLP listener SHALL bind to loopback unless configured
+  otherwise and SHALL refuse peers outside its allow-list.
+- **Rationale / Hazard link:** HAZARD-SEC-001.
+- **Verification:** `tests/integration/test_f01_f08_auth_wired.py`; `tests/unit/test_f01_f08_auth.py`
+
+#### REQ-SEC-002
+- **Source:** `src/infrastructure/streaming/mqtt_publisher.py`, `src/infrastructure/log_privacy.py`
+- **Statement:** A patient identifier SHALL NOT appear in an MQTT topic or, in clear, in a
+  structured log field; MQTT publishing SHALL refuse to start without a topic key of at least 32
+  characters.
+- **Rationale / Hazard link:** HAZARD-SEC-002.
+- **Verification:** `tests/unit/test_f04_opaque_topic.py`; `tests/integration/test_f12_f13_privacy.py`
+
 ## 4. Non-Functional Requirements (observed, not separately REQ-tagged)
 
 The following are implemented and tested but have no dedicated `REQ-*` tag in source — listed

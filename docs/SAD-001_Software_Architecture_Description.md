@@ -391,10 +391,12 @@ RTM-001 rather than re-litigated here:
 
 ### 9.2 Error Handling
 
-Two global exception handlers registered in `create_app()` (§8.1):
+Three global exception handlers registered in `create_app()` (§8.1):
 
 - `value_error_handler` (`main.py:217-238`, REQ-API-001): domain `ValueError` → HTTP 422 with
   `{"error": "validation_error", "detail": str(exc)}`.
+- `request_validation_handler` (REQ-API-011, added 2026-11-19): request-model validation
+  failure → HTTP 422 with `type`, `loc` and `msg` only; the submitted value is not echoed.
 - `unhandled_exception_handler` (`main.py:240-267`, REQ-API-002): any other exception → HTTP 500
   with a fixed generic body; the actual exception type/message/traceback is logged server-side
   only (`structlog` ERROR level), never returned to the caller. Regression-tested by
@@ -409,24 +411,40 @@ restricted to `["GET", "POST"]` (`main.py:207-213`).
 
 ### 9.4 Logging
 
-`structlog` throughout — every module-level logger is `structlog.get_logger(__name__)`. No
-central logging-configuration call exists anywhere in `src/` (`grep -rn "structlog.configure"
-src/` — zero matches across all 35 files, not a scope-limited check); structlog's default
-processor chain is used as-is, confirmed by a prior session's
-`structlog.testing.capture_logs()`-based test working without any explicit configuration.
+`structlog` throughout — every module-level logger is `structlog.get_logger(__name__)`. Since
+2026-11-19 `main.py` calls `log_privacy.install()` once at import, which prepends a processor
+that pseudonymises `patient_id`, `patient`, `mrn` and `criteria` values (keyed HMAC;
+`LOG_PSEUDONYM_KEY` for stable pseudonyms) to structlog's default chain (REQ-SEC-002).
 
 ### 9.5 Configuration (`src/config.py`)
 
-17 accessor functions (`get_mllp_enabled()` through `get_cors_allowed_origins()`), one per
-environment variable, each with an explicit default and, where a hazard depends on it
+Accessor functions (`get_mllp_enabled()` through `get_cors_allowed_origins()`; 2026-11-19 added
+`get_gateway_api_keys()`, `validate_gateway_auth_config()`, `get_mqtt_topic_key()` and
+`get_mllp_allowed_networks()`), one per environment variable, each with an explicit default and, where a hazard depends on it
 (`get_cors_allowed_origins()`, `get_provisioning_ca_bundle_path()`), fail-closed validation
 rather than a silent fallback to an unsafe value.
+
+### 9.6 Authentication and data-path security (added 2026-11-19)
+
+- API key on ingest/vitals and the live WebSocket; fail-closed startup (REQ-SEC-001, HAZARD-SEC-001).
+- MLLP: loopback bind by default, peer allow-list, `MSA|AR` on oversized frames, de-duplication of
+  byte-identical retransmissions (HAZARD-STREAM-001).
+- MQTT topic format: `<prefix>/<HMAC-SHA256(MQTT_TOPIC_KEY, patient id)[:32]>` (REQ-SEC-002).
+- TLS is terminated by the reverse proxy (`deploy/reverse-proxy/nginx.conf`: HTTPS/WSS on 443,
+  MLLP over TLS on 2576); the gateway itself listens on loopback.
+- FHIR Bundle (H-01..H-05): no `note`/`extension`/`total`; software version in `meta.tag`;
+  pipeline warnings in the OperationOutcome; content-derived UUIDv5 resource IDs; unsafe patient
+  identifiers carried as `subject.identifier`.
+- Release images are pushed to GHCR, SBOM-attested and signed with keyless cosign
+  (`.github/workflows/release-image.yml`).
 
 ## 10. Deployment View
 
 ### 10.1 Container Image (`Dockerfile`)
 
-Two-stage build: `python:3.11-alpine3.19` builder (compiles `scipy`/`numpy`'s native
+Two-stage build: `python:3.11-alpine3.23` (pinned by digest since 2026-11-19; installs
+`requirements.lock` with `--require-hashes`; the runtime stage applies `apk upgrade` and removes
+`setuptools`/`wheel`) builder (compiles `scipy`/`numpy`'s native
 dependencies) → minimal Alpine runtime stage (`libstdc++`, `openblas` only). Non-root user
 (`gateway`, uid/gid 1001). `ENTRYPOINT ["/app/entrypoint.sh"]` runs
 `ensure_device_identity()`'s CLI wrapper (`bootstrap_cli.py`, no-op unless

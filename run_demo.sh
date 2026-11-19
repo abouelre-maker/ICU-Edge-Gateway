@@ -141,6 +141,13 @@ fi
 export GATEWAY_API_KEYS
 export GATEWAY_API_KEY="${GATEWAY_API_KEY:-${GATEWAY_API_KEYS%%,*}}"
 
+# HD-E7: NEWS2 staleness windows from the labelled DEMONSTRATION profile
+# (not clinically validated). Values already in the environment win.
+while IFS='=' read -r name value; do
+    [[ "$name" =~ ^NEWS2_STALENESS_WINDOW_[A-Z0-9_]+_SECONDS$ ]] || continue
+    [[ -n "${!name:-}" ]] || export "$name=${value%$'\r'}"
+done < "$REPO_ROOT/deploy/profiles/news2-staleness.demo.env"
+
 # ── 1. Gateway ──────────────────────────────────────────────────────────────
 
 log "Starting gateway (uvicorn, MLLP enabled)..."

@@ -139,6 +139,9 @@ QMS-001/SRS-001 going forward (see RMF-001 §9's identical open question about H
 | REQ-API-002 | `unhandled_exception_handler()` — `src/main.py:240-267` | Same information-disclosure control as REQ-API-001 | `tests/integration/test_main_exception_handler.py::TestReqApi002NoLeakOnUnhandledException` — **added in this revision** (see §6; previously no dedicated test existed for this exact guarantee, as SRS-001 §6 and RMF-001 both already flagged) |
 | REQ-API-003 | `health_check()` — `src/api/v1/health.py:59-66` | Operational/availability requirement, not a clinical-scoring hazard control | `tests/integration/test_api_health.py::TestHealthEndpoint` (13 tests) |
 | REQ-API-010 | `VitalSignPayload(BaseModel)` — `src/api/v1/vitals.py:45-50` | HAZARD-DSP-007 (Open, INTERIM sign-off only) — SRS-001 explicit: this requirement's statement does **not** claim NaN/Infinity exclusion; actual mitigation is downstream in `PhysiologicalBoundsChecker`, not this Pydantic model | `tests/integration/test_api_vitals.py::TestVitalsValidationErrors` |
+| REQ-API-011 | `request_validation_handler()` — `src/main.py` | HAZARD-SEC-002 | `tests/integration/test_f12_f13_privacy.py` |
+| REQ-SEC-001 | `require_api_key`, `authorize_websocket` — `src/api/auth.py`; router dependencies and lifespan check — `src/main.py`; MLLP bind/allow-list — `src/config.py` | HAZARD-SEC-001 | `tests/integration/test_f01_f08_auth_wired.py`; `tests/unit/test_f01_f08_auth.py`; `tests/unit/test_config.py::TestGetMllpHost` |
+| REQ-SEC-002 | `opaque_topic_segment` — `mqtt_publisher.py`; `pseudonymize_identifiers` — `src/infrastructure/log_privacy.py` | HAZARD-SEC-002 | `tests/unit/test_f04_opaque_topic.py`; `tests/integration/test_f12_f13_privacy.py` |
 
 **§3 row count: 17** (one per `REQ-*` ID; matches SRS-001 §3's 17-requirement count exactly).
 
@@ -324,3 +327,17 @@ already existed; only its source-traceability was missing).
   reference** — same standing gap as SRS-001/RMF-001; the `Open - Deferred by Scope Decision`
   status on the five new rows and the interim sign-off on HAZARD-STREAM-012 are both
   engineering-only determinations, not clinical risk judgments.
+
+## Revision 2026-11-19 — additional verification evidence
+
+| Item | New evidence |
+|---|---|
+| HAZARD-STREAM-001 | `tests/integration/test_a8_mllp_dedup.py` (AR on oversize; de-duplication; reused MSH-10 with new content processed) |
+| HAZARD-STREAM-006 | `tests/unit/test_f05_f07_subscription_hardening.py` (bypass forms, connect-time address check, no redirects) |
+| HAZARD-STREAM-009 | `tests/unit/test_f05_f07_subscription_hardening.py`; `tests/integration/test_f01_f08_auth_wired.py::TestSubscriptionSecretNonAscii` |
+| HAZARD-STREAM-003/004 (MQTT) | `tests/unit/test_f04_opaque_topic.py`; `tests/unit/test_f04_patient_id_and_dead_letter.py` |
+| REQ-FHIR-001 (Bundle validity) | `tests/unit/test_h01_h06_fhir_validity.py`; `tests/integration/test_fhir_bundle.py::TestBundleAssembler::test_collection_bundle_has_no_total` |
+| HAZARD-TIME-001 | Demo profile check 2026-11-19 (fresh readings scored, 2-hour-old readings withheld) |
+
+Suite at this revision: 1056 passed, 4 xfailed, 95% statement coverage (Python 3.11.9).
+No credentialed CSO has reviewed these additions; new hazard rows are unscored.
