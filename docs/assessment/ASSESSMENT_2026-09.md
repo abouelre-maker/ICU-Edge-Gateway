@@ -89,7 +89,7 @@ BLOCKED-TEST-CONFLICT · DEFERRED-TO-CI · WONTFIX.
 | R-02 | C | High | OPEN | | | REG-001 (2026-08-06) predates the streaming layer. |
 | R-03 | C | Low | OPEN | | | Stale test counts (332 / 661 / 816) across 12 files. |
 | R-04 | C | Low | OPEN | | | `allow_origins=["*"]` claim in 6 files. |
-| R-05 | C / NRC | Low | OPEN | | | `PUSH_READINESS.md` contradicts itself on CI; FDA guidance date unsettled. |
+| R-05 | C / NRC | Low | OPEN | | | `PUSH_READINESS.md` contradicts itself on CI; FDA guidance date unsettled. Research (ledger L1/L2): issued 6 Jan 2026, FDA page current as of 29 Jan 2026; the repo's "15 January" is unsourced — fix in Phase 7. |
 | R-06 | C | Medium | OPEN | | | `21 CFR 880.3780` at `news2_calculator.py:15`; contradictory Health Canada / CDS-Non-Device labels. |
 | R-07 | C / NRC | Medium | OPEN | | | Outreach kit overclaims; missing CAN-SPAM/CASL elements. |
 | R-08 | C | Medium | OPEN | | | Earlier commercial artifacts repeat disproven claims. Superseded in Step 1 (see `docs/commercial/SUPERSEDED.md`). |

@@ -48,6 +48,18 @@ Each item: what is needed, options, recommendation, and what it blocks. Status i
   behaviour, why it is wrong, and the two options.
 - **Status:** OPEN (empty)
 
+### Delegated design decisions (Step 3) — decided by delegation 2026-09-29, pending clinical review
+
+Each is also recorded as an unsigned PROPOSAL in `regulatory/findings/<ID>.md` when the
+finding is implemented.
+
+| Q | Decision | Finding |
+|---|---|---|
+| Q1 | Staleness: option (b). Production strict and fail-closed (NEWS2 enabled + any window unset ⇒ refuse to start); no clinical default in `src/`. Test-only windows appended to `tests/conftest.py`. Delegated A1/A2 test amendments only under the five conditions of the continuation directive. | A2 |
+| Q2 | Critical values: compute NEWS2 normally, outcome `OUT_OF_RANGE_CRITICAL`, reason `CRITICAL_VALUE_REVIEW_REQUIRED`, measured value preserved, HTTP 200. Implausible values stay artifacts (no score). No threshold value changes. | A6 |
+| Q3 | Future-timestamp tolerance: default 60 s, configurable (clock-skew engineering parameter). | A2 |
+| Q4 | Cross-message MLLP merging deferred; each fragment yields INCOMPLETE. Recorded as a known gap. | A2 |
+
 ### HD-E7 — Per-parameter staleness windows (clinical values)
 - **Blocks:** enabling NEWS2 in any deployment (service refuses to start with NEWS2 on and
   any window unset).

@@ -53,15 +53,23 @@ Status column is updated as Track E closes findings (see `ASSESSMENT_2026-09.md`
 | No durable queue | A8 | OPEN |
 | No high availability | — | OPEN (not in scope) |
 | Regulatory classification unresolved | R-01, R-02 | OPEN |
+| Vitals split across multiple MLLP messages are not merged; each fragment yields INCOMPLETE | A2 (Q4, deferred) | OPEN (deferred by decision 2026-09-29) |
 
 ## REGULATORY HYPOTHESES — never assert; for counsel only
 
-- The FDA CDS guidance (revised January 2026; sources disagree on 6 vs 15 January —
-  to be verified) probably does not exempt a streaming ICU scoring product.
-- The ingest/normalise core *might* fit Medical Device Data System territory
-  (21 CFR 880.6310).
+- The FDA CDS guidance (issued **6 January 2026**; the FDA page shows "current as of
+  29 January 2026") probably does not exempt a streaming ICU scoring product. The
+  "15 January" date found in this repo is unsourced and is fixed under R-05 in Phase 7.
+- Medical Device Data System (21 CFR 880.6310): **unlikely to cover live streaming** —
+  the regulation excludes devices intended for active patient monitoring, and FDA's 2022
+  MDDS guidance treats active-monitoring functions as device functions. Possibly relevant
+  to retrospective / replay use only; counsel to confirm.
 - EU MDR Rule 11 likely classifies decision-support software IIa or higher.
 - Egypt EDA pathway for medical-device software: unknown; to be researched.
 - Consequence: for the next 6–12 months the software is offered **only** for
   non-clinical use, research use, integration testing, and shadow-mode evaluation.
-  Outputs are never used for patient-care decisions.
+  Outputs are never used for patient-care decisions. **The default pilot offer is the
+  Replay pilot** (retrospective, de-identified, offline); a live shadow pilot is optional
+  and gated on counsel and on the Track E findings closed at that time.
+- Egypt Personal Data Protection Law 151/2020: executive regulations issued November
+  2025; the grace period ends approximately October/November 2026.
