@@ -66,8 +66,8 @@ services:
       ca-bundle-fetcher:
         condition: service_completed_successfully
     ports:
-      - "8000:8000"
-      - "2575:2575"
+      - "127.0.0.1:8000:8000"   # loopback only: remote clients go through the TLS proxy
+      - "127.0.0.1:2575:2575"
     environment:
       # HD-E7: staleness windows. A value set in the host environment wins;
       # otherwise the labelled DEMONSTRATION profile applies (not clinically
