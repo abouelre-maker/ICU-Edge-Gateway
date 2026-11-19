@@ -31,6 +31,9 @@ from infrastructure.fhir.observation_builder import (
 _BUNDLE_PROFILE: Final = "http://hl7.org/fhir/StructureDefinition/Bundle"
 _IEC62304_EXT: Final = "https://samd.icu-edge/fhir/extensions/iec62304-software-version"
 _SW_VERSION: Final = "1.0.0"
+# Local code system for ScoreOutcome reason codes. Not a published standard
+# terminology — TODO-VERIFY: replace the host with the owner's real domain.
+_REASON_CODE_SYS: Final = "https://samd.icu-edge/fhir/CodeSystem/score-reason"
 
 
 class BundleAssembler:
@@ -139,6 +142,10 @@ class BundleAssembler:
                     )
                 )
 
+        # ── Scoring outcome (A6): valid R4 OperationOutcome entry ────────────
+        if result.assessment.findings:
+            entries.append(self._build_outcome_entry(result))
+
         # ── Bundle Assembly ────────────────────────────────────────────────────
         bundle: dict[str, Any] = {
             "resourceType": "Bundle",
@@ -193,6 +200,49 @@ class BundleAssembler:
         return {
             "fullUrl": f"urn:uuid:{ctx.device_id}",
             "resource": device_resource,
+        }
+
+    @staticmethod
+    def _build_outcome_entry(result: VitalsAnalysisResult) -> dict[str, Any]:
+        """
+        One OperationOutcome carrying the machine-readable scoring outcome and
+        every reason code (docs/assessment/PHASE1_DESIGN.md §2). Critical values
+        keep their measured value in issue.diagnostics (A6).
+        """
+        # Local import keeps the module import graph unchanged at load time.
+        from domain.entities.score_outcome import (  # noqa: PLC0415
+            INCOMPLETE_CODES,
+            ReasonCode,
+        )
+
+        assessment = result.assessment
+        issues: list[dict[str, Any]] = []
+        for f in assessment.findings:
+            if f.code is ReasonCode.CRITICAL_VALUE_REVIEW_REQUIRED:
+                severity, issue_code = "warning", "business-rule"
+            elif f.code in INCOMPLETE_CODES:
+                severity, issue_code = "warning", "incomplete"
+            else:
+                severity, issue_code = "information", "informational"
+            diag = f.detail
+            if f.parameter is not None:
+                diag = f"{f.parameter.name}: {diag}"
+            if f.measured_value is not None:
+                diag = f"{diag} Measured value: {f.measured_value:g}."
+            issues.append(
+                {
+                    "severity": severity,
+                    "code": issue_code,
+                    "details": {
+                        "coding": [{"system": _REASON_CODE_SYS, "code": f.code.value}],
+                        "text": f"Scoring outcome: {assessment.outcome.value}",
+                    },
+                    "diagnostics": diag,
+                }
+            )
+        return {
+            "fullUrl": f"urn:uuid:{uuid.uuid4()}",
+            "resource": {"resourceType": "OperationOutcome", "issue": issues},
         }
 
     @staticmethod

@@ -29,6 +29,8 @@ from fastapi.responses import JSONResponse
 from infrastructure.adapters.hl7v2_adapter import HL7v2Adapter
 from infrastructure.fhir.bundle_assembler import BundleAssembler
 
+from api.v1.outcome_headers import outcome_headers
+
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["HL7 Ingestion"])
@@ -251,6 +253,7 @@ def _pipeline_headers(result: object) -> dict[str, str]:
         return {"X-CDS-Advisory-Only": "true"}
 
     headers: dict[str, str] = {
+        **outcome_headers(result),
         "X-CDS-Advisory-Only": "true",
         "X-Pipeline-Duration-Ms": str(round(result.processing_duration_ms, 2)),
         "X-Warning-Count": str(len(result.pipeline_warnings)),

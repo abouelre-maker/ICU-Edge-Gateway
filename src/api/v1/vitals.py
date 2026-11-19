@@ -30,6 +30,8 @@ from fastapi.responses import JSONResponse
 from infrastructure.fhir.bundle_assembler import BundleAssembler
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from api.v1.outcome_headers import outcome_headers
+
 _log: structlog.BoundLogger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["Normalized Vitals"])
@@ -294,6 +296,7 @@ async def ingest_vitals(
 
     # Build response headers
     headers: dict[str, str] = {
+        **outcome_headers(analysis_result),
         "X-CDS-Advisory-Only": "true",
         "X-Pipeline-Duration-Ms": str(round(analysis_result.processing_duration_ms, 2)),
         "X-Warning-Count": str(len(analysis_result.pipeline_warnings)),
