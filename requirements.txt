@@ -15,15 +15,8 @@ scipy==1.17.1
 # Nothing under src/ imports pytest at runtime, and CI confirms /app/tests
 # is absent from the built image.
 #
-# pytest-cov BELOW IS STILL HERE, DELIBERATELY NOT REMOVED IN THAT CHANGE --
-# the authorised edit covered pytest only. It is equally test-only and
-# equally duplicated in requirements-dev.txt:3, so it is a live question
-# whether it should follow pytest out of this file. It does NOT reintroduce
-# the advisory: pytest-cov==4.1.0 requires `pytest>=4.6`, which resolves to a
-# fixed pytest, and `pip-audit -r` against pytest-cov alone returns
-# "No known vulnerabilities found" (verified 2026-08-23). Note this means the
-# RESOLVED production environment still installs pytest transitively.
-pytest-cov==4.1.0
+# pytest-cov was removed from this file on 2026-11-19 (S-03): test-only,
+# already in requirements-dev.txt, and it pulled pytest into production.
 structlog==26.1.0
 hl7apy==1.3.5
 fastapi==0.141.1
@@ -76,3 +69,7 @@ httpx==0.25.2
 # against Endor (or an equivalent SCA tool) before production sign-off,
 # same as the other two SOUP entries in this file.
 cryptography==50.0.0
+# S-05 (2026-11-19): transitive dependency of httpx, pinned to the first
+# release that fixes PYSEC-2026-4320 (the resolved 2026.7.22 was affected).
+# `pip-audit -r requirements.txt` reports no known vulnerabilities with this set.
+certifi==2026.10.23

@@ -27,10 +27,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -69,7 +69,7 @@ jobs:
 
       # ── Step 6: Upload Coverage (informational) ──────────────────────────────
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
         if: ${{ !cancelled() }}
         with:
           files: coverage.xml
@@ -77,16 +77,16 @@ jobs:
 
   # ─── Job 2: Docker Build, Size Check & Smoke Test ────────────────────────────
   docker-build:
-    name: Docker Build — Alpine 3.19, Edge-Optimized (size-limited)
+    name: Docker Build — Alpine 3.23, Edge-Optimized (size-limited)
     runs-on: ubuntu-latest
     needs: quality-gate  # Only run if quality gate passes
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Build runtime stage image
         run: |
@@ -115,10 +115,22 @@ jobs:
       # ── Smoke Test — Health Endpoint ──────────────────────────────────────────
       - name: Smoke test — GET /health returns status 'healthy'
         run: |
+          # F-01 / A2: the gateway refuses to start without an API key and
+          # the NEWS2 staleness windows. Synthetic smoke test: random key,
+          # TEST-HARNESS staleness value (same as tests/conftest.py), not a
+          # clinical value (HD-E7 open).
+          key="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+          echo "::add-mask::$key"
+          stale=""
+          for t in RESPIRATORY_RATE SPO2 SUPPLEMENTAL_O2 SYSTOLIC_BP HEART_RATE CONSCIOUSNESS TEMPERATURE_CELSIUS; do
+            stale="$stale -e NEWS2_STALENESS_WINDOW_${t}_SECONDS=315360000"
+          done
+          # shellcheck disable=SC2086
           docker run \
             --detach \
             --name gateway-smoke \
             --publish 8000:8000 \
+            -e GATEWAY_API_KEYS="$key" $stale \
             icu-edge-fhir-gateway:ci
 
           # Wait for application startup (scipy imports take a moment on first run)
@@ -151,10 +163,28 @@ jobs:
 
       # ── Container Security Scan (Trivy) ───────────────────────────────────────
       - name: Trivy container vulnerability scan
-        uses: aquasecurity/trivy-action@master
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: icu-edge-fhir-gateway:ci
           format: table
-          exit-code: "0"       # Warn — do not fail CI on Trivy findings in v1.0
+          exit-code: "1"       # S-06: fixable HIGH/CRITICAL findings fail the build
           severity: HIGH,CRITICAL
           ignore-unfixed: true
+
+      # ── SBOM (S-06) ───────────────────────────────────────────────────────────
+      - name: Generate CycloneDX SBOM of the image
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: icu-edge-fhir-gateway:ci
+          format: cyclonedx
+          output: sbom.cdx.json
+
+      - name: Upload SBOM
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cdx.json
+          if-no-files-found: warn

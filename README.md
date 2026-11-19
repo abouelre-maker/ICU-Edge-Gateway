@@ -168,7 +168,7 @@ a liveness check.
 unset, the gateway falls back to a `http://localhost:3000` dev default; if set to `*`, the
 gateway refuses to start ([src/config.py](src/config.py) — HAZARD-CORS-001 mitigation).
 
-For containerized deployment, see the multi-stage `Dockerfile` (Alpine 3.19, non-root,
+For containerized deployment, see the multi-stage `Dockerfile` (Alpine 3.23 pinned by digest, non-root,
 CI fails the build if the image exceeds 400 MB) and [docs/DEPLOYMENT_RUNBOOK.md](docs/DEPLOYMENT_RUNBOOK.md) for the
 full step-by-step procedure.
 
