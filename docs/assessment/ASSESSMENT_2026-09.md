@@ -56,13 +56,13 @@ BLOCKED-TEST-CONFLICT · DEFERRED-TO-CI · WONTFIX.
 
 | ID | Phase 0 | Severity | Status | Commit | Tests | Finding |
 |---|---|---|---|---|---|---|
-| F-01 | C | Critical | OPEN | | | No authentication on `/ingest`, `/vitals`, WebSocket, MLLP; binds `0.0.0.0`. |
-| F-02 | C / NRC | High | OPEN | | | No body caps; sync parsing/DSP inside async handlers. Stall figures not yet measured. |
-| F-03 | C-R | High | OPEN | | | 200 KB MLLP frame → connection reset, no NAK; 1 MiB cap is dead code; no timeout, no connection cap. |
-| F-04 | C-R | High | OPEN | | | `+`/`#`/over-long patient_id → paho `ValueError` → requeued forever (queue halt). `/` injects topic levels. PHI in topic. |
+| F-01 | C | Critical | PARTIAL — MLLP allow-list wired; HTTP auth BLOCKED-TEST-CONFLICT F01-1, default bind F01-2 | 6deea8d | tests/unit/test_f01_f08_auth.py | No authentication on `/ingest`, `/vitals`, WebSocket, MLLP; binds `0.0.0.0`. |
+| F-02 | C / NRC | High | CLOSED (stall 7754→15 ms, 8460→15 ms measured) | 14ca3ff | tests/integration/test_f02_payload_caps.py | No body caps; sync parsing/DSP inside async handlers. Stall figures not yet measured. |
+| F-03 | C-R | High | CLOSED except AR-on-oversize (BLOCKED-TEST-CONFLICT F03-1) | f0a358e | tests/integration/test_f03_mllp_limits.py | 200 KB MLLP frame → connection reset, no NAK; 1 MiB cap is dead code; no timeout, no connection cap. |
+| F-04 | C-R | High | CLOSED except opaque topic (BLOCKED-TEST-CONFLICT F04-1) | e9dc4e3 | tests/unit/test_f04_patient_id_and_dead_letter.py | `+`/`#`/over-long patient_id → paho `ValueError` → requeued forever (queue halt). `/` injects topic levels. PHI in topic. |
 | F-05 | C-R | High | OPEN | | | SSRF guard: all seven bypass forms accepted. |
 | F-06/07 | C-R (partial) | High | OPEN | | | Shared secret; `compare_digest` TypeError on non-ASCII; unbounded subscriptions/tasks; CRLF accepted; raw header lines logged; cross-subscriber credential read. |
-| F-08 | C | High | OPEN | | | WebSocket: no auth, no Origin check. |
+| F-08 | C | High | BLOCKED-TEST-CONFLICT F08-1 (guard implemented, not wired) | 6deea8d | tests/unit/test_f01_f08_auth.py | WebSocket: no auth, no Origin check. |
 | F-09/10 | C | High | OPEN | | | No TLS on HTTP/WS/MLLP; device cert unused on data path; MQTT system CA + password. |
 | F-12 | C | Medium | OPEN | | | Patient identifiers in logs and 422 bodies. |
 | F-13 | C | Medium | OPEN | | | `/docs` public; versions at `/health`; CORS falls back to `localhost:3000`. |
@@ -98,3 +98,4 @@ BLOCKED-TEST-CONFLICT · DEFERRED-TO-CI · WONTFIX.
 
 - 2026-09-30 — created from the Phase 0 report (Step 1, E0).
 - 2026-09-30 — Phase 1 statuses, commits and tests recorded.
+- 2026-09-30 — Phase 2 statuses recorded; gate item "POST /ingest without credentials → 401" FAILS (422) pending F01-1.

@@ -31,3 +31,8 @@ Chronological record of every change on `hardening/assessment-2026-09`.
 | 2026-09-30 | 622bd7d | A7 | Patient identity from all PID-3 repetitions; MSH-9/MSH-2 checks |
 | 2026-09-30 | 7a2a175 | A8 | ACK correctness (partial; A8-1 blocked; durable queue deferred) |
 | 2026-09-30 | 96d59cb | V-01 | Vendor code table → provenance-labelled data |
+| 2026-09-30 | f372fba | E1 | Phase 1 records |
+| 2026-09-30 | 14ca3ff | F-02 | Body/OBX/waveform caps; off-loop processing; stall 7754→15 ms, 610→19 ms, 8460→15 ms (measured) |
+| 2026-09-30 | f0a358e | F-03 | MLLP limit=, timeouts, connection cap; F03-1 blocked. Note: commit message has a mojibake dash (PowerShell encoding), not amended (R2) |
+| 2026-09-30 | e9dc4e3 | F-04 | patient_id validation; MQTT dead-letter; F04-1 blocked |
+| 2026-09-30 | 6deea8d | F-01/F-08 | MLLP allow-list wired; auth guards implemented, not wired (F01-1, F01-2, F08-1) |
