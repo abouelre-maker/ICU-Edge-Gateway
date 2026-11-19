@@ -51,6 +51,7 @@ from __future__ import annotations
 import asyncio
 import collections
 import contextlib
+import hashlib
 import ipaddress
 import re
 import uuid
@@ -147,15 +148,7 @@ class MLLPListener:
 
     def __init__(
         self,
-        # Bandit B104 (hardcoded_bind_all_interfaces): intentional design,
-        # not an oversight -- this listener's whole purpose (see module
-        # docstring above) is accepting MLLP connections from ICU bedside
-        # monitors and hospital interface engines generally, an unknown
-        # and variable set of LAN peers, not one fixed/known host. Binding
-        # a single interface would defeat that purpose. This default is
-        # also always overridden by config.get_mllp_host() at the actual
-        # construction site (main.py), itself overridable via MLLP_HOST
-        # for deployments that need to narrow this.
+        # F01-2: loopback by default; main.py passes config.get_mllp_host().
         host: str = "127.0.0.1",
         port: int = 2575,
         forward_buffer: StoreAndForwardRingBuffer[dict[str, Any]] | None = None,
@@ -204,7 +197,7 @@ class MLLPListener:
         # not re-processed, so one observation never becomes several records.
         # ponytail: in-memory LRU, lost on restart; a durable store comes with
         # the durable forward queue (A8 known gap).
-        self._accepted_keys: collections.OrderedDict[tuple[str, str, str], None] = (
+        self._accepted_keys: collections.OrderedDict[tuple[str, str, str], bytes] = (
             collections.OrderedDict()
         )
         self._dedup_capacity = dedup_capacity
@@ -286,8 +279,15 @@ class MLLPListener:
                 if frame is None:
                     break  # clean EOF between messages
                 key = _dedup_key(frame)
-                if key is not None and key in self._accepted_keys:
-                    # A8-1: retransmission of an accepted message.
+                digest = hashlib.sha256(frame).digest()
+                seen = self._accepted_keys.get(key) if key is not None else None
+                if seen is not None and seen != digest:
+                    # Same sender + MSH-10 but DIFFERENT content (e.g. a
+                    # monitor counter reset after reboot): never swallow new
+                    # clinical data -- process it normally and say so.
+                    log.warning("mllp_listener.frame.control_id_reused_with_new_content")
+                if key is not None and seen == digest:
+                    # A8-1: byte-identical retransmission of an accepted message.
                     self._accepted_keys.move_to_end(key)
                     log.info("mllp_listener.frame.duplicate_not_reprocessed")
                     outcome = MLLPIngestOutcome(
@@ -307,7 +307,7 @@ class MLLPListener:
                     if outcome.accepted and outcome.bundle is not None:
                         self._publish(outcome.bundle, log)
                         if key is not None:
-                            self._remember_accepted(key)
+                            self._remember_accepted(key, digest)
                 ack = self._build_ack(outcome)
                 writer.write(_START_BLOCK + ack.encode("utf-8") + _FRAME_TERMINATOR)
                 await writer.drain()
@@ -369,8 +369,8 @@ class MLLPListener:
                 return
             budget -= len(chunk)
 
-    def _remember_accepted(self, key: tuple[str, str, str]) -> None:
-        self._accepted_keys[key] = None
+    def _remember_accepted(self, key: tuple[str, str, str], digest: bytes) -> None:
+        self._accepted_keys[key] = digest
         self._accepted_keys.move_to_end(key)
         while len(self._accepted_keys) > self._dedup_capacity:
             self._accepted_keys.popitem(last=False)

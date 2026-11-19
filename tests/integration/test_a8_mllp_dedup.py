@@ -115,3 +115,17 @@ async def test_oversized_frame_over_stream_limit_gets_ar() -> None:
         writer.close()
     finally:
         await lst.stop()
+
+
+async def test_reused_control_id_with_new_content_is_processed() -> None:
+    """Safety review blocker: a sender that reuses MSH-10 for a NEW message
+    (e.g. counter reset after reboot) must not have it silently dropped."""
+    lst = await _listener()
+    try:
+        changed = FULL_ORU.replace("PT-MLLP-001", "PT-MLLP-002")
+        assert changed != FULL_ORU
+        acks = await _exchange(lst, FULL_ORU, changed)
+        assert all(b"MSA|AA|MSG001|" in a for a in acks)
+        assert lst.forward_buffer.size() == 2
+    finally:
+        await lst.stop()
